@@ -35,13 +35,17 @@ public protocol ArsenalItem : AnyObject {
         case disk
     }
     
+    /// String used to identify this Arsenal.
+    let identifier: String
+    
     /// Creates a new cache with default limits for disk and memory.
     /// 500 MB of memory limit.
     /// 1 day of max staleness.
-    init(costLimit: UInt64 = UInt64(5e+8), maxStaleness: TimeInterval = 86400) {
+    init(_ identifier: String, costLimit: UInt64 = UInt64(5e+8), maxStaleness: TimeInterval = 86400) {
+        self.identifier = identifier
         self.resources = [
             .memory: MemoryArsenal<T>(costLimit: costLimit),
-            .disk: DiskArsenal<T>(maxStaleness: maxStaleness),
+            .disk: DiskArsenal<T>(identifier, maxStaleness: maxStaleness),
         ]
     }
     
@@ -150,7 +154,7 @@ import UIKit
 
 @available(iOS 17.0, macOS 14.0, macCatalyst 17.0, watchOS 10.0, visionOS 1.0, *)
 struct ImageArsenalKey: EnvironmentKey {
-    @ArsenalActor static var defaultValue: Arsenal<UIImage> = Arsenal<UIImage>()
+    @ArsenalActor static var defaultValue: Arsenal<UIImage> = Arsenal<UIImage>("com.bedroomcode.image.arsenal")
 }
 
 @available(iOS 17.0, macOS 14.0, macCatalyst 17.0, watchOS 10.0, visionOS 1.0, *)
@@ -338,8 +342,10 @@ extension EnvironmentValues {
     private let fileManager: FileManager = FileManager()
     private let maxStaleness: TimeInterval
     var costLimit: UInt64
+    let identifier: String
     
-    init(maxStaleness: TimeInterval = 0, costLimit: UInt64 = 0) {
+    init(_ identifier: String, maxStaleness: TimeInterval = 0, costLimit: UInt64 = 0) {
+        self.identifier = identifier
         self.maxStaleness = maxStaleness
         self.costLimit = 0
     }
@@ -348,16 +354,19 @@ extension EnvironmentValues {
     // This can fail, if it does there's not much to do
     // so we just return nil.
     private var cacheURL: URL? {
-        if let baseURL = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first?.appending(component: "Square") {
+        if let baseURL = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first?.appending(component: sanitizedIdentifier) {
             try? fileManager.createDirectory(at: baseURL, withIntermediateDirectories: true)
             return baseURL
         }
         return nil
     }
     
+    lazy private var sanitizedIdentifier: String = sanitize(identifier)
+    lazy private var allowedCharacterSet: CharacterSet = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "."))
+
     // Ensure any key can be used as a name of a fuil on disk.
     private func sanitize(_ key: String) -> String {
-        return key.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? key
+        return key.addingPercentEncoding(withAllowedCharacters: allowedCharacterSet) ?? key
     }
     
     // Returns a full valid URL for a key.
