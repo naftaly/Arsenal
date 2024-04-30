@@ -23,7 +23,7 @@ import Foundation
 @available(iOS 17.0, macOS 14.0, macCatalyst 17.0, watchOS 10.0, visionOS 1.0, *)
 public protocol ArsenalItem : AnyObject {
     func toData() -> Data?
-    static func from(data: Data) -> ArsenalItem?
+    static func from(data: Data?) -> ArsenalItem?
     var cost: UInt64 { get }
 }
 
@@ -41,11 +41,11 @@ public protocol ArsenalItem : AnyObject {
     /// Creates a new cache with default limits for disk and memory.
     /// 500 MB of memory limit.
     /// 1 day of max staleness.
-    init(_ identifier: String, costLimit: UInt64 = UInt64(5e+8), maxStaleness: TimeInterval = 86400) {
+    init(_ identifier: String, resources: [ResourceType: any ArsenalImp<T>]? = nil, costLimit: UInt64 = UInt64(5e+8), maxStaleness: TimeInterval = 86400) {
         self.identifier = identifier
         self.resources = [
-            .memory: MemoryArsenal<T>(costLimit: costLimit),
-            .disk: DiskArsenal<T>(identifier, maxStaleness: maxStaleness),
+            .memory: resources?[.memory] ?? MemoryArsenal<T>(costLimit: costLimit),
+            .disk: resources?[.disk] ?? DiskArsenal<T>(identifier, maxStaleness: maxStaleness),
         ]
     }
     
@@ -133,7 +133,10 @@ extension UIImage: ArsenalItem {
     public func toData() -> Data? {
         return jpegData(compressionQuality: 1)
     }
-    public static func from(data: Data) -> ArsenalItem? {
+    public static func from(data: Data?) -> ArsenalItem? {
+        guard let data else {
+            return nil
+        }
         return UIImage(data: data)
     }
     public var cost: UInt64 {
@@ -171,7 +174,7 @@ extension EnvironmentValues {
 // Disk and Image internal Arsenal implementations from here on.
 
 @available(iOS 17.0, macOS 14.0, macCatalyst 17.0, watchOS 10.0, visionOS 1.0, *)
-@ArsenalActor fileprivate protocol ArsenalImp<T> : Sendable {
+@ArsenalActor public protocol ArsenalImp<T> : Sendable {
     associatedtype T
     
     func set(_ value: T?, key: String)
@@ -181,6 +184,46 @@ extension EnvironmentValues {
     func purge()
     func purgeUnowned()
     func clear()
+}
+
+@available(iOS 17.0, macOS 14.0, macCatalyst 17.0, watchOS 10.0, visionOS 1.0, *)
+fileprivate class ArsenalURLProvider {
+    
+    let identifier: String
+    let prefix: String
+    let fileManager: FileManager
+    
+    init(_ identifier: String, prefix: String = "", fileManager: FileManager) {
+        self.identifier = identifier
+        self.prefix = prefix
+        self.fileManager = fileManager
+    }
+    
+    // Base folder for our caches.
+    // This can fail, if it does there's not much to do
+    // so we just return nil.
+    var cacheURL: URL? {
+        if let baseURL = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first?.appending(component: sanitizedIdentifier) {
+            try? fileManager.createDirectory(at: baseURL, withIntermediateDirectories: true)
+            return baseURL
+        }
+        return nil
+    }
+    
+    lazy private var sanitizedIdentifier: String = sanitize(prefix.isEmpty ? identifier : prefix + "." + identifier)
+    lazy private var allowedCharacterSet: CharacterSet = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "._-"))
+    
+    // Ensure any key can be used as a name of a fuil on disk.
+    func sanitize(_ key: String) -> String {
+        return key.addingPercentEncoding(withAllowedCharacters: allowedCharacterSet) ?? key
+    }
+    
+    // Returns a full valid URL for a key.
+    // This is where the cache items appears on disk.
+    func url(for key: String) -> URL? {
+        return cacheURL?.appending(component: sanitize(key))
+    }
+    
 }
 
 @available(iOS 17.0, macOS 14.0, macCatalyst 17.0, watchOS 10.0, visionOS 1.0, *)
@@ -339,40 +382,16 @@ extension EnvironmentValues {
 @available(iOS 17.0, macOS 14.0, macCatalyst 17.0, watchOS 10.0, visionOS 1.0, *)
 @ArsenalActor fileprivate class DiskArsenal<T: ArsenalItem> : ArsenalImp, @unchecked Sendable {
     
-    private let fileManager: FileManager = FileManager()
+    private let urlProvider: ArsenalURLProvider
     private let maxStaleness: TimeInterval
     var costLimit: UInt64
     let identifier: String
     
     init(_ identifier: String, maxStaleness: TimeInterval = 0, costLimit: UInt64 = 0) {
         self.identifier = identifier
+        self.urlProvider = ArsenalURLProvider(identifier, fileManager: FileManager())
         self.maxStaleness = maxStaleness
         self.costLimit = 0
-    }
-    
-    // Base folder for our caches.
-    // This can fail, if it does there's not much to do
-    // so we just return nil.
-    private var cacheURL: URL? {
-        if let baseURL = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first?.appending(component: sanitizedIdentifier) {
-            try? fileManager.createDirectory(at: baseURL, withIntermediateDirectories: true)
-            return baseURL
-        }
-        return nil
-    }
-    
-    lazy private var sanitizedIdentifier: String = sanitize(identifier)
-    lazy private var allowedCharacterSet: CharacterSet = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "."))
-
-    // Ensure any key can be used as a name of a fuil on disk.
-    private func sanitize(_ key: String) -> String {
-        return key.addingPercentEncoding(withAllowedCharacters: allowedCharacterSet) ?? key
-    }
-    
-    // Returns a full valid URL for a key.
-    // This is where the cache items appears on disk.
-    private func url(for key: String) -> URL? {
-        return cacheURL?.appending(component: sanitize(key))
     }
     
     public func update(costLimit to: UInt64) {
@@ -382,21 +401,21 @@ extension EnvironmentValues {
     public func set(_ value: T?, key: String) {
         ArsenalActor.assertIsolated()
         
-        guard let url = url(for: key) else {
+        guard let url = urlProvider.url(for: key) else {
             return
         }
         if let data = value?.toData() {
             try? data.write(to: url, options: .atomic)
             purge()
         } else {
-            try? fileManager.removeItem(at: url)
+            try? urlProvider.fileManager.removeItem(at: url)
         }
     }
     
     public func value(for key: String) -> T? {
         ArsenalActor.assertIsolated()
         
-        guard let url = url(for: key), let data = try? Data(contentsOf: url, options: .mappedIfSafe) else {
+        guard let url = urlProvider.url(for: key), let data = try? Data(contentsOf: url, options: .mappedIfSafe) else {
             return nil
         }
         return T.from(data: data) as? T
@@ -405,8 +424,8 @@ extension EnvironmentValues {
     public func contains(for key: String) -> Bool {
         ArsenalActor.assertIsolated()
         
-        if let url = url(for: key) {
-            return url.isFileURL ? fileManager.fileExists(atPath: url.path()) : false
+        if let url = urlProvider.url(for: key) {
+            return urlProvider.fileManager.fileExists(atPath: url.path())
         }
         return false
     }
@@ -416,16 +435,18 @@ extension EnvironmentValues {
     public func purge() {
         ArsenalActor.assertIsolated()
         
+        // TODO: Implement purge based on cost as well
+        
         guard maxStaleness > 0 else {
             return
         }
         
-        guard let baseURL = cacheURL else {
+        guard let baseURL = urlProvider.cacheURL else {
             return
         }
         
         // WARNING: By using `.contentModificationDateKey` we need to declare our usage in `PrivacyInfo.xcprivacy`.
-        guard let urls = try? fileManager.contentsOfDirectory(at: baseURL, includingPropertiesForKeys: [.contentModificationDateKey], options: .skipsHiddenFiles) else {
+        guard let urls = try? urlProvider.fileManager.contentsOfDirectory(at: baseURL, includingPropertiesForKeys: [.contentModificationDateKey], options: .skipsHiddenFiles) else {
             return
         }
         
@@ -451,7 +472,7 @@ extension EnvironmentValues {
             }
             
             // We now know we need to delete the item
-            try? fileManager.removeItem(at: url)
+            try? urlProvider.fileManager.removeItem(at: url)
         }
         
     }
@@ -459,15 +480,123 @@ extension EnvironmentValues {
     public func clear() {
         ArsenalActor.assertIsolated()
         
-        guard let baseURL = cacheURL else {
+        guard let baseURL = urlProvider.cacheURL else {
             return
         }
-        if let urls = try? fileManager.contentsOfDirectory(at: baseURL, includingPropertiesForKeys: nil) {
+        if let urls = try? urlProvider.fileManager.contentsOfDirectory(at: baseURL, includingPropertiesForKeys: nil) {
             for url in urls {
-                try? fileManager.removeItem(at: url)
+                try? urlProvider.fileManager.removeItem(at: url)
             }
         }
     }
 }
 
+#if canImport(SwiftData)
+import SwiftData
+
+@available(iOS 17.0, macOS 14.0, macCatalyst 17.0, watchOS 10.0, visionOS 1.0, *)
+@ArsenalActor fileprivate class SwiftDataArsenal<T: ArsenalItem> : ArsenalImp, @unchecked Sendable {
+    
+    @Model
+    fileprivate class ArsenalItemModel {
+        @Attribute(.unique) let key: String
+        @Attribute(.externalStorage) let data: Data?
+        let cost: UInt64
+        var timestamp: Date = Date()
+        
+        @Transient lazy var value: T? = T.from(data: data) as? T
+        
+        init(key: String, value: T, cost: UInt64) {
+            self.key = key
+            self.data = value.toData()
+            self.cost = cost
+            self.value = value
+        }
+    }
+    
+    private let maxStaleness: TimeInterval
+    var costLimit: UInt64
+    let identifier: String
+    private let modelContainer: ModelContainer?
+    private let modelContext: ModelContext?
+    private let urlProvider: ArsenalURLProvider
+    
+    init(_ identifier: String, maxStaleness: TimeInterval = 0, costLimit: UInt64 = 0) {
+        self.identifier = identifier
+        self.urlProvider = ArsenalURLProvider(identifier, prefix: "sd", fileManager: FileManager())
+        self.maxStaleness = maxStaleness
+        self.costLimit = 0
+        
+        if let configURL = urlProvider.url(for: identifier)?.appendingPathExtension("sqlite") {
+            let config = ModelConfiguration(identifier, url: configURL)
+            self.modelContainer = try? ModelContainer(for: ArsenalItemModel.self, configurations: config)
+        } else {
+            self.modelContainer = try? ModelContainer(for: ArsenalItemModel.self)
+        }
+
+        if let container = self.modelContainer {
+            self.modelContext = ModelContext(container)
+        } else {
+            self.modelContext = nil
+        }
+    }
+    
+    public func update(costLimit to: UInt64) {
+        ArsenalActor.assertIsolated()
+        // noop for now
+    }
+    
+    public func set(_ value: T?, key: String) {
+        ArsenalActor.assertIsolated()
+        
+        if let val = value {
+            let item = ArsenalItemModel(key: key, value: val, cost: val.cost)
+            modelContext?.insert(item)
+        } else {
+            
+            let fetchDescriptor = FetchDescriptor<ArsenalItemModel>(predicate: #Predicate { item in
+                item.key == key
+            })
+            do {
+                if let item = try modelContext?.fetch(fetchDescriptor).first {
+                    try modelContext?.delete(item)
+                }
+            } catch {
+                // TODO:
+            }
+        }
+        
+    }
+    
+    public func value(for key: String) -> T? {
+        ArsenalActor.assertIsolated()
+
+        let fetchDescriptor = FetchDescriptor<ArsenalItemModel>(predicate: #Predicate { item in
+            item.key == key
+        })
+        return try? modelContext?.fetch(fetchDescriptor).first?.value
+    }
+    
+    public func contains(for key: String) -> Bool {
+        ArsenalActor.assertIsolated()
+        
+        return value(for: key) != nil
+    }
+    
+    public func purgeUnowned() {}
+    
+    public func purge() {
+        ArsenalActor.assertIsolated()
+
+        // TODO: Implement purge
+    }
+    
+    public func clear() {
+        ArsenalActor.assertIsolated()
+        try? modelContext?.delete(model: ArsenalItemModel.self)
+    }
+}
+
+
+#endif
 
