@@ -41,12 +41,18 @@ public protocol ArsenalItem : AnyObject {
     /// Creates a new cache with default limits for disk and memory.
     /// 500 MB of memory limit.
     /// 1 day of max staleness.
-    init(_ identifier: String, resources: [ResourceType: any ArsenalImp<T>]? = nil, costLimit: UInt64 = UInt64(5e+8), maxStaleness: TimeInterval = 86400) {
+    init(_ identifier: String, costLimit: UInt64 = UInt64(5e+8), maxStaleness: TimeInterval = 86400) {
         self.identifier = identifier
         self.resources = [
-            .memory: resources?[.memory] ?? MemoryArsenal<T>(costLimit: costLimit),
-            .disk: resources?[.disk] ?? DiskArsenal<T>(identifier, maxStaleness: maxStaleness),
+            .memory: MemoryArsenal<T>(costLimit: costLimit),
+            .disk: DiskArsenal<T>(identifier, maxStaleness: maxStaleness),
         ]
+    }
+    
+    /// You create your own cache with whatever resources you like.
+    init(_ identifier: String, resources: [ResourceType: any ArsenalImp<T>]) {
+        self.identifier = identifier
+        self.resources = resources
     }
     
     /// Sets a cached item.
@@ -227,7 +233,7 @@ fileprivate class ArsenalURLProvider {
 }
 
 @available(iOS 17.0, macOS 14.0, macCatalyst 17.0, watchOS 10.0, visionOS 1.0, *)
-@ArsenalActor fileprivate class MemoryArsenal<T: ArsenalItem> : ArsenalImp, @unchecked Sendable {
+@ArsenalActor public class MemoryArsenal<T: ArsenalItem> : ArsenalImp, @unchecked Sendable {
     
     init(costLimit: UInt64 = 0) {
         self.costLimit = costLimit
@@ -304,7 +310,7 @@ fileprivate class ArsenalURLProvider {
         
         // least recently accessed first (LRU)
         var sorted = cache.values.sorted { item1, item2 in
-            item1.timestamp > item2.timestamp
+            return item1.timestamp.compare(item2.timestamp) == .orderedAscending
         }
         
         while !sorted.isEmpty && usedCost >= costLimit {
@@ -380,7 +386,7 @@ fileprivate class ArsenalURLProvider {
 }
 
 @available(iOS 17.0, macOS 14.0, macCatalyst 17.0, watchOS 10.0, visionOS 1.0, *)
-@ArsenalActor fileprivate class DiskArsenal<T: ArsenalItem> : ArsenalImp, @unchecked Sendable {
+@ArsenalActor public class DiskArsenal<T: ArsenalItem> : ArsenalImp, @unchecked Sendable {
     
     private let urlProvider: ArsenalURLProvider
     private let maxStaleness: TimeInterval
@@ -495,7 +501,7 @@ fileprivate class ArsenalURLProvider {
 import SwiftData
 
 @available(iOS 17.0, macOS 14.0, macCatalyst 17.0, watchOS 10.0, visionOS 1.0, *)
-@ArsenalActor fileprivate class SwiftDataArsenal<T: ArsenalItem> : ArsenalImp, @unchecked Sendable {
+@ArsenalActor public class SwiftDataArsenal<T: ArsenalItem> : ArsenalImp, @unchecked Sendable {
     
     @Model
     fileprivate class ArsenalItemModel {
@@ -558,8 +564,8 @@ import SwiftData
                 item.key == key
             })
             do {
-                if let item = try modelContext?.fetch(fetchDescriptor).first {
-                    try modelContext?.delete(item)
+                if let modelContext = modelContext, let item = try modelContext.fetch(fetchDescriptor).first {
+                    modelContext.delete(item)
                 }
             } catch {
                 // TODO:
