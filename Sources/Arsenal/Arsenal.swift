@@ -147,9 +147,7 @@ extension UIImage: ArsenalItem {
     }
     public var cost: UInt64 {
         // I'm assuming any image we use is ARGB
-        // or some other simple form of RGB with 4 bytes per pixel,
-        // so i'm not even accounting for it.
-        return UInt64(size.width * size.height)
+        return UInt64(size.width * size.height * 4)
     }
 }
 
@@ -219,7 +217,7 @@ fileprivate class ArsenalURLProvider {
     lazy private var sanitizedIdentifier: String = sanitize(prefix.isEmpty ? identifier : prefix + "." + identifier)
     lazy private var allowedCharacterSet: CharacterSet = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "._-"))
     
-    // Ensure any key can be used as a name of a fuil on disk.
+    // Ensure any key can be used as a name of a file on disk.
     func sanitize(_ key: String) -> String {
         return key.addingPercentEncoding(withAllowedCharacters: allowedCharacterSet) ?? key
     }
@@ -266,9 +264,11 @@ fileprivate class ArsenalURLProvider {
     public func value(for key: String) -> T? {
         ArsenalActor.assertIsolated()
         
+        guard var item = cache[key] else { return nil }
+        
         // update the last accessed date to ensure purges are correctly ordered
-        cache[key]?.updateTimestamp()
-        return cache[key]?.value
+        item.updateTimestamp()
+        return item.value
     }
     
     public func contains(_ key: String) -> Bool {
@@ -285,12 +285,12 @@ fileprivate class ArsenalURLProvider {
         // referenced anywhere will be nilled out
         // then we recreate the cache with what
         // is really owned.
-        
+
         print("Purge unowned")
         print("trying to purge \(cache.count) items using \(usedCost) in cost")
         
         let weakItems = cache.values.map { $0.weakify() }
-        cache = [:]
+        cache.removeAll()
         usedCost = 0
         let strongItems = weakItems.compactMap { $0.strongify() }
         usedCost = strongItems.reduce(0) { $0 + $1.cost }
@@ -353,7 +353,7 @@ fileprivate class ArsenalURLProvider {
         mutating func updateTimestamp() {
             timestamp = Date()
         }
-        
+
         func weakify() -> MemoryWeakItem {
             MemoryWeakItem(key: key, value: value, cost: cost, timestamp: timestamp)
         }
@@ -456,19 +456,19 @@ fileprivate class ArsenalURLProvider {
             return
         }
         
+        // sort URLs newest to oldest
         var sortedUrls = urls.sorted { url1, url2 in
-            guard let date1 = try? url1.promisedItemResourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate,
-                  let date2 = try? url2.promisedItemResourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate else {
+            guard let date1 = try? url1.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate,
+                  let date2 = try? url2.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate else {
                 return false
             }
-            return date1.compare(date2) == .orderedAscending
+            return date1.compare(date2) == .orderedDescending
         }
         
         let now = Date()
-        while let url = sortedUrls.first {
-            sortedUrls.remove(at: 0)
-            
-            guard let date = try? url.promisedItemResourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate else {
+        while let url = sortedUrls.popLast() {
+
+            guard let date = try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate else {
                 continue
             }
             
@@ -505,9 +505,9 @@ import SwiftData
     
     @Model
     fileprivate class ArsenalItemModel {
-        @Attribute(.unique) let key: String
-        @Attribute(.externalStorage) let data: Data?
-        let cost: UInt64
+        @Attribute(.unique) var key: String
+        @Attribute(.externalStorage) var data: Data?
+        var cost: UInt64
         var timestamp: Date = Date()
         
         @Transient lazy var value: T? = T.from(data: data) as? T
