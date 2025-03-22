@@ -20,14 +20,14 @@ import Foundation
 /// Cache is thread safe and isolated to the @ArsenalActor.
 ///
 
-@available(iOS 17.0, macOS 14.0, macCatalyst 17.0, watchOS 10.0, visionOS 1.0, *)
+@available(iOS 17.0, macOS 14.0, macCatalyst 17.0, watchOS 10.0, visionOS 1.0, tvOS 13.0, *)
 public protocol ArsenalItem : AnyObject {
     func toData() -> Data?
     static func from(data: Data?) -> ArsenalItem?
     var cost: UInt64 { get }
 }
 
-@available(iOS 17.0, macOS 14.0, macCatalyst 17.0, watchOS 10.0, visionOS 1.0, *)
+@available(iOS 17.0, macOS 14.0, macCatalyst 17.0, watchOS 10.0, visionOS 1.0, tvOS 17.0, *)
 @ArsenalActor @Observable final public class Arsenal<T: ArsenalItem> : Sendable {
     
     public enum ResourceType {
@@ -41,12 +41,20 @@ public protocol ArsenalItem : AnyObject {
     /// Creates a new cache with default limits for disk and memory.
     /// 500 MB of memory limit.
     /// 1 day of max staleness.
-    init(_ identifier: String, costLimit: UInt64 = UInt64(5e+8), maxStaleness: TimeInterval = 86400) {
-        self.identifier = identifier
-        self.resources = [
-            .memory: MemoryArsenal<T>(costLimit: costLimit),
-            .disk: DiskArsenal<T>(identifier, maxStaleness: maxStaleness),
-        ]
+    convenience init(_ identifier: String, costLimit: UInt64 = UInt64(5e+8), maxStaleness: TimeInterval = 86400) {
+        self.init(
+            identifier,
+            resources: [
+                .memory: MemoryArsenal<T>(
+                    costLimit: costLimit
+                ),
+                .disk: DiskArsenal<T>(
+                    identifier,
+                    maxStaleness: maxStaleness,
+                    costLimit: costLimit
+                ),
+            ]
+        )
     }
     
     /// You create your own cache with whatever resources you like.
@@ -83,7 +91,7 @@ public protocol ArsenalItem : AnyObject {
     public func value(for key: URL) async -> T? {
         await value(for: key.absoluteString)
     }
-    
+
     /// Updates the cost limits.
     /// This can cause a purge if the new weight limit is below usage.
     public func update(costLimit: UInt64, for types: Set<ResourceType> = [.memory]) async {
@@ -106,6 +114,19 @@ public protocol ArsenalItem : AnyObject {
         }
     }
     
+    /// Returns costs for resources
+    public func cost(_ types: Set<ResourceType> = [.memory, .disk]) async -> UInt64 {
+        types.reduce(into: 0) {
+            $0 += (resources[$1])?.cost ?? 0
+        }
+    }
+    
+    public func costLimit(_ types: Set<ResourceType> = [.memory, .disk]) async -> UInt64 {
+        types.reduce(into: 0) {
+            $0 += (resources[$1])?.costLimit ?? 0
+        }
+    }
+    
     /// Removes all items from memory and disk cache.
     public func clear(_ types: Set<ResourceType> = [.memory, .disk]) async {
         for type in types {
@@ -123,8 +144,27 @@ public protocol ArsenalItem : AnyObject {
     private var resources: [ResourceType: any ArsenalImp<T>]
 }
 
+@available(iOS 17.0, macOS 14.0, macCatalyst 17.0, watchOS 10.0, visionOS 1.0, tvOS 17.0, *)
+extension Arsenal {
+    public var diskResourceCost: UInt64 {
+        diskResource?.cost ?? 0
+    }
+    
+    public var diskResourceCostLimit: UInt64 {
+        diskResource?.costLimit ?? 0
+    }
+    
+    public var memoryResourceCost: UInt64 {
+        memoryResource?.cost ?? 0
+    }
+    
+    public var memoryResourceCostLimit: UInt64 {
+        memoryResource?.costLimit ?? 0
+    }
+}
+
 /// A global actor for the Arsenal, use as `@ArsenalActor`.
-@available(iOS 17.0, macOS 14.0, macCatalyst 17.0, watchOS 10.0, visionOS 1.0, *)
+@available(iOS 17.0, macOS 14.0, macCatalyst 17.0, watchOS 10.0, visionOS 1.0, tvOS 17.0, *)
 @globalActor public struct ArsenalActor {
     public actor ActorType { }
     public static let shared: ActorType = ActorType()
@@ -134,7 +174,7 @@ public protocol ArsenalItem : AnyObject {
 import UIKit
 
 /// An extension to UIImage that supports `ArsenalItem`
-@available(iOS 17.0, macOS 14.0, macCatalyst 17.0, watchOS 10.0, visionOS 1.0, *)
+@available(iOS 17.0, macOS 14.0, macCatalyst 17.0, watchOS 10.0, visionOS 1.0, tvOS 17.0, *)
 extension UIImage: ArsenalItem {
     public func toData() -> Data? {
         return jpegData(compressionQuality: 1)
@@ -159,12 +199,12 @@ import UIKit
 
 /// Use as `@Environment(\.imageCache) var imageCache`
 
-@available(iOS 17.0, macOS 14.0, macCatalyst 17.0, watchOS 10.0, visionOS 1.0, *)
-struct ImageArsenalKey: EnvironmentKey {
+@available(iOS 17.0, macOS 14.0, macCatalyst 17.0, watchOS 10.0, visionOS 1.0, tvOS 17.0, *)
+struct ImageArsenalKey: @preconcurrency EnvironmentKey {
     @ArsenalActor static var defaultValue: Arsenal<UIImage> = Arsenal<UIImage>("com.bedroomcode.image.arsenal")
 }
 
-@available(iOS 17.0, macOS 14.0, macCatalyst 17.0, watchOS 10.0, visionOS 1.0, *)
+@available(iOS 17.0, macOS 14.0, macCatalyst 17.0, watchOS 10.0, visionOS 1.0, tvOS 17.0, *)
 extension EnvironmentValues {
     public var imageArsenal: Arsenal<UIImage> {
         get { self[ImageArsenalKey.self] }
@@ -177,7 +217,7 @@ extension EnvironmentValues {
 // MARK: Private
 // Disk and Image internal Arsenal implementations from here on.
 
-@available(iOS 17.0, macOS 14.0, macCatalyst 17.0, watchOS 10.0, visionOS 1.0, *)
+@available(iOS 17.0, macOS 14.0, macCatalyst 17.0, watchOS 10.0, visionOS 1.0, tvOS 17.0, *)
 @ArsenalActor public protocol ArsenalImp<T> : Sendable {
     associatedtype T
     
@@ -188,9 +228,12 @@ extension EnvironmentValues {
     func purge()
     func purgeUnowned()
     func clear()
+    
+    var costLimit: UInt64 { get }
+    var cost: UInt64 { get }
 }
 
-@available(iOS 17.0, macOS 14.0, macCatalyst 17.0, watchOS 10.0, visionOS 1.0, *)
+@available(iOS 17.0, macOS 14.0, macCatalyst 17.0, watchOS 10.0, visionOS 1.0, tvOS 17.0, *)
 fileprivate class ArsenalURLProvider {
     
     let identifier: String
@@ -230,7 +273,7 @@ fileprivate class ArsenalURLProvider {
     
 }
 
-@available(iOS 17.0, macOS 14.0, macCatalyst 17.0, watchOS 10.0, visionOS 1.0, *)
+@available(iOS 17.0, macOS 14.0, macCatalyst 17.0, watchOS 10.0, visionOS 1.0, tvOS 17.0, *)
 @ArsenalActor public class MemoryArsenal<T: ArsenalItem> : ArsenalImp, @unchecked Sendable {
     
     init(costLimit: UInt64 = 0) {
@@ -249,14 +292,14 @@ fileprivate class ArsenalURLProvider {
         ArsenalActor.assertIsolated()
         
         if let img = cache[key] {
-            usedCost -= img.cost
+            cost -= img.cost
             cache[key] = nil
         }
         
         if let img = value {
             let item = MemoryItem(key: key, value: img)
             cache[key] = item
-            usedCost += item.cost
+            cost += item.cost
         }
         purge()
     }
@@ -287,16 +330,16 @@ fileprivate class ArsenalURLProvider {
         // is really owned.
 
         print("Purge unowned")
-        print("trying to purge \(cache.count) items using \(usedCost) in cost")
+        print("trying to purge \(cache.count) items using \(cost) in cost")
         
         let weakItems = cache.values.map { $0.weakify() }
         cache.removeAll()
-        usedCost = 0
+        cost = 0
         let strongItems = weakItems.compactMap { $0.strongify() }
-        usedCost = strongItems.reduce(0) { $0 + $1.cost }
+        cost = strongItems.reduce(0) { $0 + $1.cost }
         strongItems.forEach { cache[$0.key] = $0 }
         
-        print("After purge we have \(cache.count) items using \(usedCost) in cost")
+        print("After purge we have \(cache.count) items using \(cost) in cost")
     }
     
     public func purge() {
@@ -304,7 +347,7 @@ fileprivate class ArsenalURLProvider {
         
         // check our limits again in case we're
         // good after removing non-referenced items.
-        guard costLimit > 0 && usedCost >= costLimit else {
+        guard costLimit > 0 && cost >= costLimit else {
             return
         }
         
@@ -313,14 +356,14 @@ fileprivate class ArsenalURLProvider {
             return item1.timestamp.compare(item2.timestamp) == .orderedAscending
         }
         
-        while !sorted.isEmpty && usedCost >= costLimit {
+        while !sorted.isEmpty && cost >= costLimit {
             guard let item = sorted.first else {
                 break
             }
             
             sorted.remove(at: 0)
             cache[item.key] = nil
-            usedCost -= item.cost
+            cost -= item.cost
         }
     }
     
@@ -328,9 +371,9 @@ fileprivate class ArsenalURLProvider {
         ArsenalActor.assertIsolated()
         
         cache = [:]
-        usedCost = 0
+        cost = 0
     }
-    
+
     private struct MemoryItem {
         let key: String
         let value: T
@@ -380,28 +423,38 @@ fileprivate class ArsenalURLProvider {
         }
     }
     
-    private var costLimit: UInt64
     private var cache: [String : MemoryItem] = [:]
-    private var usedCost: UInt64 = 0
+    public private(set) var cost: UInt64 = 0
+    public var costLimit: UInt64
 }
 
-@available(iOS 17.0, macOS 14.0, macCatalyst 17.0, watchOS 10.0, visionOS 1.0, *)
+@available(iOS 17.0, macOS 14.0, macCatalyst 17.0, watchOS 10.0, visionOS 1.0, tvOS 17.0, *)
 @ArsenalActor public class DiskArsenal<T: ArsenalItem> : ArsenalImp, @unchecked Sendable {
     
     private let urlProvider: ArsenalURLProvider
     private let maxStaleness: TimeInterval
-    var costLimit: UInt64
+    private var usedCost: UInt64 = 0
+    public var costLimit: UInt64
+    public private(set) var cost: UInt64
     let identifier: String
     
     init(_ identifier: String, maxStaleness: TimeInterval = 0, costLimit: UInt64 = 0) {
         self.identifier = identifier
         self.urlProvider = ArsenalURLProvider(identifier, fileManager: FileManager())
         self.maxStaleness = maxStaleness
-        self.costLimit = 0
+        self.costLimit = costLimit
+        self.cost = 0
+        Task {
+            self.cost = calculateCost()
+        }
     }
-    
+
     public func update(costLimit to: UInt64) {
         ArsenalActor.assertIsolated()
+        
+        costLimit = to
+        purgeUnowned()
+        purge()
     }
     
     public func set(_ value: T?, key: String) {
@@ -411,10 +464,18 @@ fileprivate class ArsenalURLProvider {
             return
         }
         if let data = value?.toData() {
-            try? data.write(to: url, options: .atomic)
-            purge()
+            do {
+                try data.write(to: url)
+                let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+                if size > 0 {
+                    cost += UInt64(size)
+                }
+                purge()
+            } catch {
+                print("DiskArsenal error: \(error)")
+            }
         } else {
-            try? urlProvider.fileManager.removeItem(at: url)
+            deleteItem(at: url)
         }
     }
     
@@ -443,7 +504,7 @@ fileprivate class ArsenalURLProvider {
         
         // TODO: Implement purge based on cost as well
         
-        guard maxStaleness > 0 else {
+        guard maxStaleness > 0 || costLimit > 0 else {
             return
         }
         
@@ -451,8 +512,7 @@ fileprivate class ArsenalURLProvider {
             return
         }
         
-        // WARNING: By using `.contentModificationDateKey` we need to declare our usage in `PrivacyInfo.xcprivacy`.
-        guard let urls = try? urlProvider.fileManager.contentsOfDirectory(at: baseURL, includingPropertiesForKeys: [.contentModificationDateKey], options: .skipsHiddenFiles) else {
+        guard let urls = try? urlProvider.fileManager.contentsOfDirectory(at: baseURL, includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey], options: .skipsHiddenFiles) else {
             return
         }
         
@@ -465,22 +525,39 @@ fileprivate class ArsenalURLProvider {
             return date1.compare(date2) == .orderedDescending
         }
         
-        let now = Date()
-        while let url = sortedUrls.popLast() {
-
-            guard let date = try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate else {
-                continue
+        // Purge based on date
+        if maxStaleness > 0 {
+            let now = Date()
+            while let url = sortedUrls.popLast() {
+                
+                guard let date = try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate else {
+                    continue
+                }
+                
+                // Item is too young, since we're sorted we can bail
+                guard now.timeIntervalSince1970 - date.timeIntervalSince1970 > maxStaleness else {
+                    break
+                }
+                
+                // We now know we need to delete the item
+                deleteItem(at: url)
             }
-            
-            // Item is too young, since we're sorted we can bail
-            guard now.timeIntervalSince1970 - date.timeIntervalSince1970 > maxStaleness else {
-                break
-            }
-            
-            // We now know we need to delete the item
-            try? urlProvider.fileManager.removeItem(at: url)
         }
         
+        // Purge based on cost
+        if costLimit > 0 {
+            
+            while cost > costLimit, let url = sortedUrls.popLast() {
+                
+                guard let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size > 0 else {
+                    continue
+                }
+
+                // We now know we need to delete the item
+                deleteItem(at: url)
+            }
+            
+        }
     }
     
     public func clear() {
@@ -491,8 +568,41 @@ fileprivate class ArsenalURLProvider {
         }
         if let urls = try? urlProvider.fileManager.contentsOfDirectory(at: baseURL, includingPropertiesForKeys: nil) {
             for url in urls {
-                try? urlProvider.fileManager.removeItem(at: url)
+                deleteItem(at: url)
             }
+        }
+    }
+    
+    private func deleteItem(at url: URL) {
+        ArsenalActor.assertIsolated()
+        
+        do {
+            let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+            try urlProvider.fileManager.removeItem(at: url)
+            if size > 0 {
+                cost -= UInt64(size)
+            }
+        } catch {
+            print("DiskArsenal error: \(error)")
+        }
+    }
+    
+    private func calculateCost() -> UInt64 {
+        ArsenalActor.assertIsolated()
+        
+        guard let baseURL = urlProvider.cacheURL else {
+            return 0
+        }
+
+        guard let urls = try? urlProvider.fileManager.contentsOfDirectory(at: baseURL, includingPropertiesForKeys: [.fileSizeKey], options: .skipsHiddenFiles) else {
+            return 0
+        }
+        
+        return urls.reduce(0) { cost, url in
+            if let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size > 0 {
+                return cost + UInt64(size)
+            }
+            return cost
         }
     }
 }
@@ -500,7 +610,7 @@ fileprivate class ArsenalURLProvider {
 #if canImport(SwiftData)
 import SwiftData
 
-@available(iOS 17.0, macOS 14.0, macCatalyst 17.0, watchOS 10.0, visionOS 1.0, *)
+@available(iOS 17.0, macOS 14.0, macCatalyst 17.0, watchOS 10.0, visionOS 1.0, tvOS 17.0, *)
 @ArsenalActor public class SwiftDataArsenal<T: ArsenalItem> : ArsenalImp, @unchecked Sendable {
     
     @Model
@@ -521,7 +631,7 @@ import SwiftData
     }
     
     private let maxStaleness: TimeInterval
-    var costLimit: UInt64
+    public var costLimit: UInt64
     let identifier: String
     private let modelContainer: ModelContainer?
     private let modelContext: ModelContext?
@@ -545,6 +655,10 @@ import SwiftData
         } else {
             self.modelContext = nil
         }
+    }
+    
+    public var cost: UInt64 {
+        0
     }
     
     public func update(costLimit to: UInt64) {

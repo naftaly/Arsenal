@@ -8,8 +8,8 @@ class ArsenalTests: XCTestCase {
     
     override func setUp() async throws {
         try await super.setUp()
-        memoryCache = await Arsenal("testMemory", resources: [.memory: MemoryArsenal<TestItem>(costLimit: 1024 * 500)])
-        diskCache = await Arsenal("testDisk", resources: [.disk: DiskArsenal<TestItem>("testDisk", maxStaleness: 2)])
+        await memoryCache = Arsenal("testMemory", resources: [.memory: MemoryArsenal<TestItem>(costLimit: 1024 * 500)])
+        await diskCache = Arsenal("testDisk", resources: [.disk: DiskArsenal<TestItem>("testDisk", maxStaleness: 2)])
     }
     
     override func tearDown() async throws {
