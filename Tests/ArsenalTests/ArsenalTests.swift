@@ -83,7 +83,9 @@ class ArsenalTests: XCTestCase {
 
     func testMemoryPurgeOnLimitExceed() async {
         // Setting items until the cache exceeds its limit
-        for i in 0 ..< 500 { // Each item is 1024 bytes, limit is 512 KB
+        // Each item is 1024 bytes, limit is 512000 bytes (1024 * 500)
+        // Adding 501 items (513024 bytes) exceeds the limit
+        for i in 0 ..< 501 {
             let item = TestItem(data: Data(repeating: UInt8(i % 256), count: 1024), cost: 1024)
             await memoryCache.set(item, key: "key\(i)")
         }
@@ -295,6 +297,60 @@ class ArsenalTests: XCTestCase {
 
         let retrieved = await memoryCache.value(for: key)
         XCTAssertEqual(retrieved?.toData(), item2.toData(), "Retrieved item should be the replacement.")
+    }
+
+    func testOverwriteExistingKeyOnDisk() async {
+        let key = "diskOverwriteKey"
+        let item1 = TestItem(data: Data(repeating: 1, count: 100), cost: 100)
+        let item2 = TestItem(data: Data(repeating: 2, count: 200), cost: 200)
+
+        await diskCache.set(item1, key: key)
+        let cost1 = await diskCache.diskResourceCost
+        XCTAssertEqual(cost1, 100, "Disk cost should reflect first item.")
+
+        await diskCache.set(item2, key: key)
+        let cost2 = await diskCache.diskResourceCost
+        XCTAssertEqual(cost2, 200, "Disk cost should reflect replaced item, not sum.")
+
+        let retrieved = await diskCache.value(for: key)
+        XCTAssertEqual(retrieved?.toData(), item2.toData(), "Retrieved item should be the replacement.")
+    }
+
+    func testOverwriteExistingKeyOnCombinedCache() async {
+        let key = "combinedOverwriteKey"
+        let item1 = TestItem(data: Data(repeating: 1, count: 100), cost: 100)
+        let item2 = TestItem(data: Data(repeating: 2, count: 200), cost: 200)
+
+        await combinedCache.set(item1, key: key)
+        let memoryCost1 = await combinedCache.memoryResourceCost
+        let diskCost1 = await combinedCache.diskResourceCost
+        XCTAssertEqual(memoryCost1, 100, "Memory cost should reflect first item.")
+        XCTAssertEqual(diskCost1, 100, "Disk cost should reflect first item.")
+
+        await combinedCache.set(item2, key: key)
+        let memoryCost2 = await combinedCache.memoryResourceCost
+        let diskCost2 = await combinedCache.diskResourceCost
+        XCTAssertEqual(memoryCost2, 200, "Memory cost should reflect replaced item, not sum.")
+        XCTAssertEqual(diskCost2, 200, "Disk cost should reflect replaced item, not sum.")
+
+        let retrieved = await combinedCache.value(for: key)
+        XCTAssertEqual(retrieved?.toData(), item2.toData(), "Retrieved item should be the replacement.")
+    }
+
+    func testMultipleOverwritesOnDisk() async {
+        let key = "multiOverwriteKey"
+
+        // Overwrite the same key multiple times
+        for i in 1 ... 5 {
+            let item = TestItem(data: Data(repeating: UInt8(i), count: 100), cost: 100)
+            await diskCache.set(item, key: key)
+        }
+
+        let finalCost = await diskCache.diskResourceCost
+        XCTAssertEqual(finalCost, 100, "Cost should only reflect the single item, not accumulated from overwrites.")
+
+        let retrieved = await diskCache.value(for: key)
+        XCTAssertEqual(retrieved?.toData(), Data(repeating: 5, count: 100), "Retrieved item should be the last written value.")
     }
 
     func testEmptyCachePurge() async {
