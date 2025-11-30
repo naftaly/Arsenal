@@ -148,7 +148,7 @@ import os
 
         // check our limits again in case we're
         // good after removing non-referenced items.
-        guard costLimit > 0, cost >= costLimit else {
+        guard costLimit > 0, cost > costLimit else {
             return
         }
 
@@ -157,7 +157,7 @@ import os
             item1.timestamp.compare(item2.timestamp) == .orderedAscending
         }
 
-        while !sorted.isEmpty, cost >= costLimit {
+        while !sorted.isEmpty, cost > costLimit {
             guard let item = sorted.first else {
                 break
             }

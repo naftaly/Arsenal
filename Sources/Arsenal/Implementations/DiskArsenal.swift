@@ -109,15 +109,25 @@ import os
         ArsenalActor.assertIsolated()
         await ensureCostCalculated()
 
-        guard let url = urlProvider.url(for: key) else {
+        guard var url = urlProvider.url(for: key) else {
             return
         }
         if let data = value?.toData() {
             do {
+                // Get old file size before overwriting
+                let oldSize = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+
                 try data.write(to: url)
-                let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
-                if size > 0 {
-                    cost += UInt64(size)
+
+                // Write succeeded - adjust cost (subtract old, add new)
+                if oldSize > 0 {
+                    cost -= UInt64(oldSize)
+                }
+                // Clear cached resource values to get accurate new file size
+                url.removeCachedResourceValue(forKey: .fileSizeKey)
+                let newSize = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+                if newSize > 0 {
+                    cost += UInt64(newSize)
                 }
                 await purge()
             } catch {
@@ -196,19 +206,26 @@ import os
         // Purge based on date
         if maxStaleness > 0 {
             let now = Date()
+            var itemsWithoutDates: [URL] = []
             while let url = sortedUrls.popLast() {
                 guard let date = try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate else {
+                    // Keep items without valid dates for cost-based purge
+                    itemsWithoutDates.append(url)
                     continue
                 }
 
                 // Item is too young, since we're sorted we can bail
                 guard now.timeIntervalSince1970 - date.timeIntervalSince1970 > maxStaleness else {
+                    // Put the item back so it can be considered for cost-based purge
+                    sortedUrls.append(url)
                     break
                 }
 
                 // We now know we need to delete the item
                 deleteItem(at: url)
             }
+            // Add back items without dates so they can be considered for cost-based purge
+            sortedUrls.append(contentsOf: itemsWithoutDates)
         }
 
         // Purge based on cost
@@ -244,8 +261,9 @@ import os
     private func deleteItem(at url: URL) {
         ArsenalActor.assertIsolated()
 
+        // Read size separately so we can still adjust cost even if this fails
+        let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
         do {
-            let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
             try urlProvider.fileManager.removeItem(at: url)
             if size > 0 {
                 cost -= UInt64(size)
