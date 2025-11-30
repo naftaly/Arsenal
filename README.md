@@ -1,82 +1,170 @@
-
-# Welcome to Arsenal! 🚀
+# Arsenal
 
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](https://opensource.org/licenses/MIT)
-[![Swift](https://img.shields.io/badge/Swift-5.5-orange.svg)](https://swift.org/)
+[![Swift](https://img.shields.io/badge/Swift-6.2-orange.svg)](https://swift.org/)
 [![Platform](https://img.shields.io/badge/platform-iOS%20%7C%20macOS%20%7C%20tvOS%20%7C%20watchOS%20%7C%20visionOS-lightgrey.svg)]()
 
-Arsenal is your go-to caching solution for Swift applications, offering powerful memory and disk caching with a sprinkle of modern Swift concurrency magic. Designed with iOS, macOS, watchOS, and visionOS in mind, Arsenal ensures your caching is efficient and thread-safe. Whether you're building a dynamic mobile app or a feature-rich macOS application, Arsenal fits right in, keeping your data snappy and your users happy.
+A multi-layer caching library for Swift with LRU memory eviction, disk persistence, and full Swift 6 concurrency support.
 
-## 🌟 Features
+## Features
 
-- **Dual Caching:** Enjoy the flexibility of both memory and disk caching.
-- **Smart Purging:** Automatic LRU (Least Recently Used) purging for memory and time-based purging for disk caches.
-- **Concurrency Ready:** Leveraging Swift's latest concurrency features for top-notch performance and safety.
-- **SwiftUI Friendly:** Drops seamlessly into SwiftUI projects, making it perfect for modern iOS development.
-- **Observable:** Plug into your reactive setups easily, watching for changes as they happen.
+- **Dual-Layer Caching** - Memory and disk caches work together with automatic promotion
+- **LRU Eviction** - Memory cache evicts least-recently-used items when cost limit is exceeded
+- **Disk Persistence** - Items survive app restarts with staleness and cost-based eviction
+- **Thread Safety** - All operations isolated via `@globalActor` for Swift 6 strict concurrency
+- **SwiftUI Integration** - Environment key for shared image caching
+- **Flexible Keys** - Use strings or URLs as cache keys
 
-## 📋 Requirements
+## Requirements
 
-- iOS 17.0+
-- macOS 14.0+
-- watchOS 10.0+
-- visionOS 1.0+
-- Swift 5.5+
+- iOS 17.0+ / macOS 14.0+ / tvOS 17.0+ / watchOS 10.0+ / visionOS 1.0+
+- Swift 6.0+
 
-## 🔧 Installation
+## Installation
 
-To get started with Arsenal, integrate it directly into your project:
+Add Arsenal to your project using Swift Package Manager:
 
-1. In Xcode, select **File** > **Swift Packages** > **Add Package Dependency...**
-2. Enter the repository URL `https://github.com/naftaly/arsenal.git`.
-3. Specify the version or branch you want to use.
-4. Follow the prompts to complete the integration.
+```swift
+dependencies: [
+    .package(url: "https://github.com/naftaly/Arsenal.git", from: "1.0.0")
+]
+```
 
-## 🚀 Usage
+Or in Xcode: **File > Add Package Dependencies** and enter the repository URL.
 
-### Set Up Your Cache
+## Usage
+
+### Define a Cacheable Type
+
+Conform your type to `ArsenalItem`:
 
 ```swift
 import Arsenal
 
-// Use the image cache directly
-@Environment(\.imageCache) var imageCache: Arsenal<UIImage>
+struct CachedData: ArsenalItem {
+    let data: Data
 
-// Make your own
-var cache = Arsenal<SomeTypeThatImplementsArsenalItem>
+    // Cost for cache eviction (e.g., byte size)
+    var cost: UInt64 { UInt64(data.count) }
+
+    // Serialize for disk storage
+    func toData() -> Data? { data }
+
+    // Deserialize from disk
+    static func from(data: Data?) -> ArsenalItem? {
+        guard let data else { return nil }
+        return CachedData(data: data)
+    }
+}
 ```
 
-### Managing Cache Entries
+### Create a Cache
 
 ```swift
-// Add an image to the cache
-await imageCache.set(image, key: "uniqueKey")
+// Combined memory + disk cache
+let cache = await Arsenal<CachedData>(
+    "com.myapp.cache",
+    costLimit: 50 * 1024 * 1024,  // 50 MB memory limit
+    maxStaleness: 86400           // 24 hour disk staleness
+)
 
-// Fetch an image from the cache
-let cachedImage = await imageCache.value(for: "uniqueKey")
+// Memory-only cache
+let memoryCache = await Arsenal<CachedData>("memoryOnly", resources: [
+    .memory: MemoryArsenal<CachedData>(costLimit: 10 * 1024 * 1024)
+])
+
+// Disk-only cache
+let diskCache = await Arsenal<CachedData>("diskOnly", resources: [
+    .disk: DiskArsenal<CachedData>("diskOnly", maxStaleness: 3600, costLimit: 100 * 1024 * 1024)
+])
 ```
 
-### Fine-tuning Your Cache
+### Store and Retrieve
 
 ```swift
-// Expand memory limit to 1 GB
-await imageCache.update(costLimit: 1_000_000_000, for: [.memory])
+// Store an item (writes to both memory and disk)
+await cache.set(item, key: "my-key")
+
+// Store with URL key
+await cache.set(item, key: URL(string: "https://example.com/data")!)
+
+// Store to specific layer only
+await cache.set(item, key: "disk-only", types: [.disk])
+
+// Retrieve (checks memory first, promotes from disk if needed)
+if let cached = await cache.value(for: "my-key") {
+    // Use cached item
+}
+
+// Remove an item
+await cache.set(nil, key: "my-key")
 ```
 
-### Maintenance
+### Cache Management
 
 ```swift
-// Trigger a purge
-await imageCache.purge()
+// Update cost limits at runtime
+await cache.update(costLimit: 100 * 1024 * 1024, for: [.memory])
 
-// Clear all items from both memory and disk
-await imageCache.clear()
+// Manually trigger eviction
+await cache.purge([.memory, .disk])
+
+// Clear all cached items
+await cache.clear([.memory, .disk])
+
+// Check current usage
+let memoryCost = await cache.memoryResourceCost
+let diskCost = await cache.diskResourceCost
 ```
 
-## 👋 Contributing
+### SwiftUI Image Caching
 
-Got ideas on how to make Arsenal even better? We'd love to hear from you! Feel free to fork the repo, push your changes, and open a pull request. You can also open an issue if you run into bugs or have feature suggestions.
+Arsenal includes built-in `UIImage` support:
 
-## 📄 License
+```swift
+struct ContentView: View {
+    @Environment(\.imageArsenal) var imageCache
 
-Arsenal is proudly open-sourced under the MIT License. Dive into the LICENSE file for more details.
+    var body: some View {
+        // Use imageCache for caching images
+    }
+}
+```
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────┐
+│                    Arsenal<T>                       │
+│              (Cache Orchestrator)                   │
+├─────────────────────────────────────────────────────┤
+│  ┌─────────────────┐    ┌─────────────────────┐    │
+│  │  MemoryArsenal  │    │    DiskArsenal      │    │
+│  │  (LRU Cache)    │◄───│  (File Storage)     │    │
+│  │                 │    │                     │    │
+│  │ • Cost limit    │    │ • Staleness limit   │    │
+│  │ • LRU eviction  │    │ • Cost limit        │    │
+│  │ • O(1) access   │    │ • File-per-item     │    │
+│  └─────────────────┘    └─────────────────────┘    │
+└─────────────────────────────────────────────────────┘
+                         │
+                         ▼
+              ┌─────────────────────┐
+              │    ArsenalActor     │
+              │  (@globalActor)     │
+              │                     │
+              │ Thread-safe access  │
+              └─────────────────────┘
+```
+
+- **Read path**: Memory → Disk (with automatic promotion to memory)
+- **Write path**: Memory + Disk (configurable per-operation)
+- **Eviction**: LRU for memory, staleness + cost for disk
+
+## Contributing
+
+Contributions welcome! Fork the repo, make your changes, and open a pull request.
+
+## License
+
+Arsenal is available under the MIT License. See the LICENSE file for details.

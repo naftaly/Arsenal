@@ -1,0 +1,288 @@
+name: Benchmarks
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  benchmark:
+    runs-on: macos-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Swift
+      uses: swift-actions/setup-swift@v2
+      with:
+        swift-version: "6.2"
+
+    - name: Run benchmarks
+      id: benchmark
+      run: |
+        echo "Running benchmarks..."
+        swift test --filter Benchmark 2>&1 | tee benchmark_output.txt
+
+    - name: Parse and format results
+      if: success()
+      run: |
+        python3 << 'EOF'
+        import re
+        from datetime import datetime
+        import subprocess
+
+        # Get system info
+        try:
+            cpu_brand = subprocess.check_output(['sysctl', '-n', 'machdep.cpu.brand_string']).decode().strip()
+            mem_bytes = int(subprocess.check_output(['sysctl', '-n', 'hw.memsize']).decode().strip())
+            mem_gb = mem_bytes / (1024**3)
+            system_info = f"{cpu_brand}, {mem_gb:.0f} GB RAM"
+        except:
+            system_info = "macOS (GitHub Actions)"
+
+        # Read benchmark output
+        with open('benchmark_output.txt', 'r') as f:
+            content = f.read()
+
+        # Find all performance test results
+        pattern = r"testBenchmark(\w+).*?average: ([\d.]+)"
+        matches = re.findall(pattern, content)
+
+        # Start markdown output
+        output = ["# 🚀 Arsenal Cache Performance Benchmarks\n"]
+        output.append("*Multi-layer caching with LRU eviction and disk persistence*\n")
+        output.append(f"**Test Hardware:** {system_info}\n")
+
+        # Memory cache benchmarks
+        output.append("## Memory Cache Operations\n")
+        output.append("| Operation | Items | Time | Per-Op | Status |")
+        output.append("|-----------|-------|------|--------|--------|")
+
+        memory_ops = {
+            "MemorySet": ("Set", 1000),
+            "MemoryGet": ("Get", 1000),
+            "MemorySetWithPurge": ("Set (with purge)", 500),
+        }
+
+        for test_name, avg_time in matches:
+            if test_name in memory_ops:
+                avg_time_f = float(avg_time)
+                op_name, ops = memory_ops[test_name]
+
+                total_ms = avg_time_f * 1000
+                per_op_us = (avg_time_f * 1_000_000) / ops
+
+                if per_op_us < 1:
+                    per_op = "<1 μs"
+                elif per_op_us < 1000:
+                    per_op = f"{per_op_us:.1f} μs"
+                else:
+                    per_op = f"{per_op_us/1000:.2f} ms"
+
+                if total_ms < 50:
+                    status = "✅ Excellent"
+                elif total_ms < 100:
+                    status = "✅ Good"
+                elif total_ms < 500:
+                    status = "⚠️ OK"
+                else:
+                    status = "❌ Review"
+
+                output.append(f"| {op_name} | {ops} | {total_ms:.1f}ms | {per_op} | {status} |")
+
+        # Disk cache benchmarks
+        output.append("\n## Disk Cache Operations\n")
+        output.append("| Operation | Items | Time | Per-Op | Status |")
+        output.append("|-----------|-------|------|--------|--------|")
+
+        disk_ops = {
+            "DiskSet": ("Set", 100),
+            "DiskGet": ("Get", 100),
+        }
+
+        for test_name, avg_time in matches:
+            if test_name in disk_ops:
+                avg_time_f = float(avg_time)
+                op_name, ops = disk_ops[test_name]
+
+                total_ms = avg_time_f * 1000
+                per_op_us = (avg_time_f * 1_000_000) / ops
+
+                if per_op_us < 1000:
+                    per_op = f"{per_op_us:.1f} μs"
+                else:
+                    per_op = f"{per_op_us/1000:.2f} ms"
+
+                # Disk ops have higher thresholds
+                if total_ms < 500:
+                    status = "✅ Excellent"
+                elif total_ms < 1000:
+                    status = "✅ Good"
+                elif total_ms < 3000:
+                    status = "⚠️ OK"
+                else:
+                    status = "❌ Review"
+
+                output.append(f"| {op_name} | {ops} | {total_ms:.1f}ms | {per_op} | {status} |")
+
+        # Combined cache benchmarks
+        output.append("\n## Combined Cache (Memory + Disk)\n")
+        output.append("| Operation | Items | Time | Per-Op | Status |")
+        output.append("|-----------|-------|------|--------|--------|")
+
+        combined_ops = {
+            "CombinedSetBoth": ("Set (both layers)", 100),
+            "CombinedGetWithPromotion": ("Get (disk→memory promotion)", 100),
+        }
+
+        for test_name, avg_time in matches:
+            if test_name in combined_ops:
+                avg_time_f = float(avg_time)
+                op_name, ops = combined_ops[test_name]
+
+                total_ms = avg_time_f * 1000
+                per_op_us = (avg_time_f * 1_000_000) / ops
+
+                if per_op_us < 1000:
+                    per_op = f"{per_op_us:.1f} μs"
+                else:
+                    per_op = f"{per_op_us/1000:.2f} ms"
+
+                if total_ms < 500:
+                    status = "✅ Excellent"
+                elif total_ms < 1000:
+                    status = "✅ Good"
+                elif total_ms < 3000:
+                    status = "⚠️ OK"
+                else:
+                    status = "❌ Review"
+
+                output.append(f"| {op_name} | {ops} | {total_ms:.1f}ms | {per_op} | {status} |")
+
+        # Large item benchmarks
+        output.append("\n## Large Items (1 MB each)\n")
+        output.append("| Storage | Items | Time | Per-Item | Status |")
+        output.append("|---------|-------|------|----------|--------|")
+
+        large_ops = {
+            "LargeItemMemory": ("Memory", 50),
+            "LargeItemDisk": ("Disk", 20),
+        }
+
+        for test_name, avg_time in matches:
+            if test_name in large_ops:
+                avg_time_f = float(avg_time)
+                storage, ops = large_ops[test_name]
+
+                total_ms = avg_time_f * 1000
+                per_op_ms = total_ms / ops
+
+                if per_op_ms < 10:
+                    status = "✅ Excellent"
+                elif per_op_ms < 50:
+                    status = "✅ Good"
+                elif per_op_ms < 100:
+                    status = "⚠️ OK"
+                else:
+                    status = "❌ Review"
+
+                output.append(f"| {storage} | {ops} | {total_ms:.0f}ms | {per_op_ms:.1f}ms | {status} |")
+
+        # Throughput benchmark
+        output.append("\n## Throughput (Mixed Read/Write)\n")
+        output.append("| Operation | Ops | Time | Ops/sec | Status |")
+        output.append("|-----------|-----|------|---------|--------|")
+
+        throughput_ops = {
+            "MemoryThroughput": ("Memory (33% write, 67% read)", 5000),
+        }
+
+        for test_name, avg_time in matches:
+            if test_name in throughput_ops:
+                avg_time_f = float(avg_time)
+                op_name, ops = throughput_ops[test_name]
+
+                total_ms = avg_time_f * 1000
+                ops_per_sec = ops / avg_time_f
+
+                if ops_per_sec > 100000:
+                    status = "✅ Excellent"
+                elif ops_per_sec > 50000:
+                    status = "✅ Good"
+                elif ops_per_sec > 10000:
+                    status = "⚠️ OK"
+                else:
+                    status = "❌ Review"
+
+                output.append(f"| {op_name} | {ops:,} | {total_ms:.0f}ms | {ops_per_sec:,.0f} | {status} |")
+
+        # Clear benchmarks
+        output.append("\n## Clear Operations\n")
+        output.append("| Storage | Items | Time | Status |")
+        output.append("|---------|-------|------|--------|")
+
+        clear_ops = {
+            "ClearMemory": ("Memory", 1000),
+            "ClearDisk": ("Disk", 100),
+        }
+
+        for test_name, avg_time in matches:
+            if test_name in clear_ops:
+                avg_time_f = float(avg_time)
+                storage, ops = clear_ops[test_name]
+
+                total_ms = avg_time_f * 1000
+
+                if total_ms < 100:
+                    status = "✅ Excellent"
+                elif total_ms < 500:
+                    status = "✅ Good"
+                elif total_ms < 1000:
+                    status = "⚠️ OK"
+                else:
+                    status = "❌ Review"
+
+                output.append(f"| {storage} | {ops} | {total_ms:.0f}ms | {status} |")
+
+        # Performance notes
+        output.append("\n## Performance Characteristics")
+        output.append("### Status Legend")
+        output.append("- ✅ **Excellent/Good**: Optimal performance")
+        output.append("- ⚠️ **OK**: Acceptable, monitor in production")
+        output.append("- ❌ **Review**: May need optimization")
+        output.append("\n### Architecture")
+        output.append("- **Memory cache**: LRU eviction with cost-based limits")
+        output.append("- **Disk cache**: File-based with staleness and cost eviction")
+        output.append("- **Combined**: Automatic disk→memory promotion on read")
+        output.append("- **Thread safety**: `@globalActor` isolation via `ArsenalActor`")
+
+        # Summary
+        total_tests = len(re.findall(r"Test Case.*passed", content))
+        output.append(f"\n---\n**Total benchmarks:** {total_tests} passed | _Generated {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}_")
+
+        # Write to file
+        with open('benchmark_results.md', 'w') as f:
+            f.write('\n'.join(output))
+
+        print('\n'.join(output))
+        EOF
+
+    - name: Comment PR with results
+      if: github.event_name == 'pull_request'
+      uses: thollander/actions-comment-pull-request@v2
+      with:
+        filePath: benchmark_results.md
+        comment_tag: benchmark-results
+
+    - name: Comment commit with results
+      if: github.event_name == 'push'
+      uses: peter-evans/commit-comment@v3
+      with:
+        body-path: benchmark_results.md

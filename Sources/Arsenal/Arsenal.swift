@@ -6,42 +6,193 @@
 
 import Foundation
 
-/// Arsenal is a simple implementation of a caching system that handles
-/// in memory as well as on disk cache.
-///
-/// The memory cache has a weight limit in bytes which when exceeded will
-/// start purging items by oldest access order (LRU) until the weight limit is not exceeded.
-///
-/// The disk cache has a max staleness value which when exceeded will
-/// purge items oldest first until no items exceeed the max staleness.
-///
-/// Arsenal is observable in order to be able to pass it in the environment if needed.
-///
-/// Cache is thread safe and isolated to the @ArsenalActor.
-///
+// MARK: - ArsenalItem Protocol
 
+/// A protocol that defines the requirements for items that can be stored in an ``Arsenal`` cache.
+///
+/// Types conforming to `ArsenalItem` must be reference types (`AnyObject`) and thread-safe (`Sendable`).
+/// They must provide serialization capabilities and a cost metric for cache management.
+///
+/// ## Conforming to ArsenalItem
+///
+/// To make a type cacheable, implement the required methods:
+///
+/// ```swift
+/// final class MyItem: ArsenalItem {
+///     let data: Data
+///
+///     func toData() -> Data? {
+///         return data
+///     }
+///
+///     static func from(data: Data?) -> ArsenalItem? {
+///         guard let data else { return nil }
+///         return MyItem(data: data)
+///     }
+///
+///     var cost: UInt64 {
+///         return UInt64(data.count)
+///     }
+/// }
+/// ```
 @available(iOS 17.0, macOS 14.0, macCatalyst 17.0, watchOS 10.0, visionOS 1.0, tvOS 13.0, *)
-public protocol ArsenalItem : AnyObject {
+public protocol ArsenalItem: AnyObject, Sendable {
+    /// Serializes the item to `Data` for disk storage.
+    ///
+    /// - Returns: The serialized data representation, or `nil` if serialization fails.
     func toData() -> Data?
+
+    /// Creates an item from serialized data.
+    ///
+    /// - Parameter data: The serialized data to deserialize.
+    /// - Returns: A new item instance, or `nil` if deserialization fails.
     static func from(data: Data?) -> ArsenalItem?
+
+    /// The cost of storing this item, used for cache limit calculations.
+    ///
+    /// This value is typically the size in bytes, but can be any consistent unit
+    /// as long as all items use the same measurement.
     var cost: UInt64 { get }
 }
 
+// MARK: - ArsenalActor
+
+/// A global actor that provides thread-safe isolation for Arsenal cache operations.
+///
+/// All cache operations are isolated to this actor to ensure thread safety.
+/// Use the `@ArsenalActor` attribute to mark code that should run on this actor.
+///
+/// ```swift
+/// @ArsenalActor
+/// func cacheOperation() async {
+///     // This code runs on the ArsenalActor
+/// }
+/// ```
 @available(iOS 17.0, macOS 14.0, macCatalyst 17.0, watchOS 10.0, visionOS 1.0, tvOS 17.0, *)
-@ArsenalActor @Observable final public class Arsenal<T: ArsenalItem> : Sendable {
-    
-    public enum ResourceType {
+@globalActor public struct ArsenalActor {
+    /// The actor type used for isolation.
+    public actor ActorType {}
+
+    /// The shared actor instance.
+    public static let shared: ActorType = .init()
+}
+
+// MARK: - ArsenalImp Protocol
+
+/// A protocol defining the interface for cache storage implementations.
+///
+/// Implement this protocol to create custom cache storage backends.
+/// Built-in implementations include ``MemoryArsenal`` and ``DiskArsenal``.
+@available(iOS 17.0, macOS 14.0, macCatalyst 17.0, watchOS 10.0, visionOS 1.0, tvOS 17.0, *)
+@ArsenalActor public protocol ArsenalImp<T>: Sendable {
+    /// The type of items this implementation stores.
+    associatedtype T
+
+    /// Stores or removes an item in the cache.
+    ///
+    /// - Parameters:
+    ///   - value: The item to store, or `nil` to remove the existing item.
+    ///   - key: The unique key to associate with the item.
+    func set(_ value: T?, key: String) async
+
+    /// Retrieves an item from the cache.
+    ///
+    /// - Parameter key: The key associated with the item.
+    /// - Returns: The cached item, or `nil` if not found.
+    func value(for key: String) async -> T?
+
+    /// Updates the cost limit for this cache.
+    ///
+    /// - Parameter to: The new cost limit.
+    func update(costLimit to: UInt64) async
+
+    /// Purges items from the cache based on the implementation's eviction policy.
+    func purge() async
+
+    /// Purges items that are no longer referenced elsewhere in the application.
+    func purgeUnowned() async
+
+    /// Removes all items from the cache.
+    func clear() async
+
+    /// The maximum cost allowed before eviction occurs.
+    var costLimit: UInt64 { get }
+
+    /// The current total cost of all cached items.
+    var cost: UInt64 { get }
+}
+
+// MARK: - Arsenal
+
+/// A dual-layer caching system with memory and disk storage.
+///
+/// Arsenal provides a flexible caching solution that combines fast in-memory access
+/// with persistent disk storage. It supports automatic eviction based on cost limits
+/// and staleness, and is fully thread-safe through actor isolation.
+///
+/// ## Overview
+///
+/// Arsenal uses a two-tier caching strategy:
+/// - **Memory cache**: Fast access with LRU (Least Recently Used) eviction
+/// - **Disk cache**: Persistent storage with time-based staleness eviction
+///
+/// When retrieving items, Arsenal checks memory first, then falls back to disk.
+/// Items retrieved from disk are automatically promoted to memory for faster subsequent access.
+///
+/// ## Usage
+///
+/// ```swift
+/// // Create a cache for images
+/// let imageCache = Arsenal<UIImage>("com.myapp.images")
+///
+/// // Store an item
+/// await imageCache.set(image, key: "hero-image")
+///
+/// // Retrieve an item
+/// if let cached = await imageCache.value(for: "hero-image") {
+///     // Use cached image
+/// }
+/// ```
+///
+/// ## Topics
+///
+/// ### Creating a Cache
+/// - ``init(_:costLimit:maxStaleness:)``
+/// - ``init(_:resources:)``
+///
+/// ### Storing and Retrieving Items
+/// - ``set(_:key:types:)-1lf3h``
+/// - ``set(_:key:types:)-20ori``
+/// - ``value(for:)-5nexh``
+/// - ``value(for:)-2gxqv``
+///
+/// ### Managing the Cache
+/// - ``purge(_:)``
+/// - ``purgeUnowned(_:)``
+/// - ``clear(_:)``
+/// - ``update(costLimit:for:)``
+@available(iOS 17.0, macOS 14.0, macCatalyst 17.0, watchOS 10.0, visionOS 1.0, tvOS 17.0, *)
+@ArsenalActor @Observable public final class Arsenal<T: ArsenalItem>: Sendable {
+    /// The type of cache resource.
+    public enum ResourceType: Sendable {
+        /// In-memory cache with LRU eviction.
         case memory
+        /// Disk-based cache with staleness eviction.
         case disk
     }
-    
-    /// String used to identify this Arsenal.
-    let identifier: String
-    
-    /// Creates a new cache with default limits for disk and memory.
-    /// 500 MB of memory limit.
-    /// 1 day of max staleness.
-    convenience init(_ identifier: String, costLimit: UInt64 = UInt64(5e+8), maxStaleness: TimeInterval = 86400) {
+
+    /// The unique identifier for this cache instance.
+    ///
+    /// This identifier is used for disk storage paths and debugging.
+    public let identifier: String
+
+    /// Creates a new cache with default memory and disk storage.
+    ///
+    /// - Parameters:
+    ///   - identifier: A unique identifier for this cache instance.
+    ///   - costLimit: The maximum cost for the memory cache. Defaults to 500 MB.
+    ///   - maxStaleness: The maximum age for disk-cached items in seconds. Defaults to 1 day.
+    public convenience init(_ identifier: String, costLimit: UInt64 = UInt64(5e+8), maxStaleness: TimeInterval = 86400) {
         self.init(
             identifier,
             resources: [
@@ -56,667 +207,174 @@ public protocol ArsenalItem : AnyObject {
             ]
         )
     }
-    
-    /// You create your own cache with whatever resources you like.
-    init(_ identifier: String, resources: [ResourceType: any ArsenalImp<T>]) {
+
+    /// Creates a new cache with custom resource implementations.
+    ///
+    /// Use this initializer to provide custom cache backends or to configure
+    /// only specific resource types.
+    ///
+    /// - Parameters:
+    ///   - identifier: A unique identifier for this cache instance.
+    ///   - resources: A dictionary mapping resource types to their implementations.
+    public init(_ identifier: String, resources: [ResourceType: any ArsenalImp<T>]) {
         self.identifier = identifier
         self.resources = resources
     }
-    
-    /// Sets a cached item.
-    /// Passing nil as a value will remove the item from cache.
+
+    /// Stores or removes an item in the cache.
+    ///
+    /// - Parameters:
+    ///   - value: The item to store, or `nil` to remove the existing item.
+    ///   - key: The unique key to associate with the item.
+    ///   - types: The resource types to update. Defaults to both memory and disk.
     public func set(_ value: T?, key: String, types: Set<ResourceType> = [.memory, .disk]) async {
-        types.forEach { type in
-            (resources[type])?.set(value, key: key)
+        await forEachResource(of: types) {
+            await $0.set(value, key: key)
         }
     }
-    
+
+    /// Stores or removes an item in the cache using a URL as the key.
+    ///
+    /// - Parameters:
+    ///   - value: The item to store, or `nil` to remove the existing item.
+    ///   - key: The URL to use as the cache key.
+    ///   - types: The resource types to update. Defaults to both memory and disk.
     public func set(_ value: T?, key: URL, types: Set<ResourceType> = [.memory, .disk]) async {
         await set(value, key: key.absoluteString, types: types)
     }
-    
-    /// Retrieve a cache item.
-    /// The cache will check in memory first, then disk.
+
+    /// Retrieves an item from the cache.
+    ///
+    /// This method checks the memory cache first for fast access. If the item
+    /// is not in memory but exists on disk, it's loaded and promoted to memory.
+    ///
+    /// - Parameter key: The key associated with the item.
+    /// - Returns: The cached item, or `nil` if not found.
     public func value(for key: String) async -> T? {
-        if let val = memoryResource?.value(for: key) {
+        if let val = await memoryResource?.value(for: key) {
             return val
         }
-        if let val: T = diskResource?.value(for: key) {
-            memoryResource?.set(val, key: key)
+        if let val: T = await diskResource?.value(for: key) {
+            await memoryResource?.set(val, key: key)
             return val
         }
         return nil
     }
-    
+
+    /// Retrieves an item from the cache using a URL as the key.
+    ///
+    /// - Parameter key: The URL used as the cache key.
+    /// - Returns: The cached item, or `nil` if not found.
     public func value(for key: URL) async -> T? {
         await value(for: key.absoluteString)
     }
 
-    /// Updates the cost limits.
-    /// This can cause a purge if the new weight limit is below usage.
+    /// Updates the cost limit for specified resource types.
+    ///
+    /// Reducing the cost limit may trigger immediate eviction of items
+    /// to bring the cache within the new limit.
+    ///
+    /// - Parameters:
+    ///   - costLimit: The new cost limit.
+    ///   - types: The resource types to update. Defaults to memory only.
     public func update(costLimit: UInt64, for types: Set<ResourceType> = [.memory]) async {
-        for type in types {
-            (resources[type])?.update(costLimit: costLimit)
+        await forEachResource(of: types) {
+            await $0.update(costLimit: costLimit)
         }
     }
 
-    /// Purges memory and disk caches based on their limits.
+    /// Purges items from the cache based on each resource's eviction policy.
+    ///
+    /// For memory caches, this evicts items using LRU until under the cost limit.
+    /// For disk caches, this removes stale items that exceed the maximum age.
+    ///
+    /// - Parameter types: The resource types to purge. Defaults to both memory and disk.
     public func purge(_ types: Set<ResourceType> = [.memory, .disk]) async {
-        for type in types {
-            (resources[type])?.purge()
+        await forEachResource(of: types) {
+            await $0.purge()
         }
     }
-    
-    /// Purges in memory caches of unreferenced items.
+
+    /// Purges items that are no longer referenced elsewhere in the application.
+    ///
+    /// This is useful for memory caches to release items that are only held by the cache.
+    ///
+    /// - Parameter types: The resource types to purge. Defaults to both memory and disk.
     public func purgeUnowned(_ types: Set<ResourceType> = [.memory, .disk]) async {
-        for type in types {
-            (resources[type])?.purgeUnowned()
+        await forEachResource(of: types) {
+            await $0.purgeUnowned()
         }
     }
-    
-    /// Returns costs for resources
+
+    /// Returns the total cost of all cached items for the specified resource types.
+    ///
+    /// - Parameter types: The resource types to include. Defaults to both memory and disk.
+    /// - Returns: The sum of costs across all specified resources.
     public func cost(_ types: Set<ResourceType> = [.memory, .disk]) async -> UInt64 {
         types.reduce(into: 0) {
-            $0 += (resources[$1])?.cost ?? 0
+            $0 += resources[$1]?.cost ?? 0
         }
     }
-    
+
+    /// Returns the total cost limit for the specified resource types.
+    ///
+    /// - Parameter types: The resource types to include. Defaults to both memory and disk.
+    /// - Returns: The sum of cost limits across all specified resources.
     public func costLimit(_ types: Set<ResourceType> = [.memory, .disk]) async -> UInt64 {
         types.reduce(into: 0) {
-            $0 += (resources[$1])?.costLimit ?? 0
+            $0 += resources[$1]?.costLimit ?? 0
         }
     }
-    
-    /// Removes all items from memory and disk cache.
+
+    /// Removes all items from the specified resource types.
+    ///
+    /// - Parameter types: The resource types to clear. Defaults to both memory and disk.
     public func clear(_ types: Set<ResourceType> = [.memory, .disk]) async {
-        for type in types {
-            (resources[type])?.clear()
+        await forEachResource(of: types) {
+            await $0.clear()
         }
     }
-    
-    /// Private resources + getters
+
+    private func forEachResource(of types: Set<ResourceType>, action: @Sendable @escaping (any ArsenalImp<T>) async -> Void) async {
+        for type in types {
+            if let res = resources[type] {
+                await action(res)
+            }
+        }
+    }
+
     private var memoryResource: (any ArsenalImp<T>)? {
-        return resources[.memory]
+        resources[.memory]
     }
+
     private var diskResource: (any ArsenalImp<T>)? {
-        return resources[.disk]
+        resources[.disk]
     }
+
     private var resources: [ResourceType: any ArsenalImp<T>]
 }
 
+// MARK: - Arsenal Convenience Properties
+
 @available(iOS 17.0, macOS 14.0, macCatalyst 17.0, watchOS 10.0, visionOS 1.0, tvOS 17.0, *)
-extension Arsenal {
-    public var diskResourceCost: UInt64 {
+public extension Arsenal {
+    /// The current cost of the disk cache.
+    var diskResourceCost: UInt64 {
         diskResource?.cost ?? 0
     }
-    
-    public var diskResourceCostLimit: UInt64 {
+
+    /// The cost limit of the disk cache.
+    var diskResourceCostLimit: UInt64 {
         diskResource?.costLimit ?? 0
     }
-    
-    public var memoryResourceCost: UInt64 {
+
+    /// The current cost of the memory cache.
+    var memoryResourceCost: UInt64 {
         memoryResource?.cost ?? 0
     }
-    
-    public var memoryResourceCostLimit: UInt64 {
+
+    /// The cost limit of the memory cache.
+    var memoryResourceCostLimit: UInt64 {
         memoryResource?.costLimit ?? 0
     }
 }
-
-/// A global actor for the Arsenal, use as `@ArsenalActor`.
-@available(iOS 17.0, macOS 14.0, macCatalyst 17.0, watchOS 10.0, visionOS 1.0, tvOS 17.0, *)
-@globalActor public struct ArsenalActor {
-    public actor ActorType { }
-    public static let shared: ActorType = ActorType()
-}
-
-#if canImport(UIKit)
-import UIKit
-
-/// An extension to UIImage that supports `ArsenalItem`
-@available(iOS 17.0, macOS 14.0, macCatalyst 17.0, watchOS 10.0, visionOS 1.0, tvOS 17.0, *)
-extension UIImage: ArsenalItem {
-    public func toData() -> Data? {
-        return jpegData(compressionQuality: 1)
-    }
-    public static func from(data: Data?) -> ArsenalItem? {
-        guard let data else {
-            return nil
-        }
-        return UIImage(data: data)
-    }
-    public var cost: UInt64 {
-        // I'm assuming any image we use is ARGB
-        return UInt64(size.width * size.height * 4)
-    }
-}
-
-#endif
-
-#if canImport(SwiftUI) && canImport(UIKit)
-import SwiftUI
-import UIKit
-
-/// Use as `@Environment(\.imageCache) var imageCache`
-
-@available(iOS 17.0, macOS 14.0, macCatalyst 17.0, watchOS 10.0, visionOS 1.0, tvOS 17.0, *)
-struct ImageArsenalKey: @preconcurrency EnvironmentKey {
-    @ArsenalActor static var defaultValue: Arsenal<UIImage> = Arsenal<UIImage>("com.bedroomcode.image.arsenal")
-}
-
-@available(iOS 17.0, macOS 14.0, macCatalyst 17.0, watchOS 10.0, visionOS 1.0, tvOS 17.0, *)
-extension EnvironmentValues {
-    public var imageArsenal: Arsenal<UIImage> {
-        get { self[ImageArsenalKey.self] }
-    }
-}
-
-#endif
-
-// MARK: -
-// MARK: Private
-// Disk and Image internal Arsenal implementations from here on.
-
-@available(iOS 17.0, macOS 14.0, macCatalyst 17.0, watchOS 10.0, visionOS 1.0, tvOS 17.0, *)
-@ArsenalActor public protocol ArsenalImp<T> : Sendable {
-    associatedtype T
-    
-    func set(_ value: T?, key: String)
-    func value(for key: String) -> T?
-    
-    func update(costLimit to: UInt64)
-    func purge()
-    func purgeUnowned()
-    func clear()
-    
-    var costLimit: UInt64 { get }
-    var cost: UInt64 { get }
-}
-
-@available(iOS 17.0, macOS 14.0, macCatalyst 17.0, watchOS 10.0, visionOS 1.0, tvOS 17.0, *)
-fileprivate class ArsenalURLProvider {
-    
-    let identifier: String
-    let prefix: String
-    let fileManager: FileManager
-    
-    init(_ identifier: String, prefix: String = "", fileManager: FileManager) {
-        self.identifier = identifier
-        self.prefix = prefix
-        self.fileManager = fileManager
-    }
-    
-    // Base folder for our caches.
-    // This can fail, if it does there's not much to do
-    // so we just return nil.
-    var cacheURL: URL? {
-        if let baseURL = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first?.appending(component: sanitizedIdentifier) {
-            try? fileManager.createDirectory(at: baseURL, withIntermediateDirectories: true)
-            return baseURL
-        }
-        return nil
-    }
-    
-    lazy private var sanitizedIdentifier: String = sanitize(prefix.isEmpty ? identifier : prefix + "." + identifier)
-    lazy private var allowedCharacterSet: CharacterSet = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "._-"))
-    
-    // Ensure any key can be used as a name of a file on disk.
-    func sanitize(_ key: String) -> String {
-        return key.addingPercentEncoding(withAllowedCharacters: allowedCharacterSet) ?? key
-    }
-    
-    // Returns a full valid URL for a key.
-    // This is where the cache items appears on disk.
-    func url(for key: String) -> URL? {
-        return cacheURL?.appending(component: sanitize(key))
-    }
-    
-}
-
-@available(iOS 17.0, macOS 14.0, macCatalyst 17.0, watchOS 10.0, visionOS 1.0, tvOS 17.0, *)
-@ArsenalActor public class MemoryArsenal<T: ArsenalItem> : ArsenalImp, @unchecked Sendable {
-    
-    init(costLimit: UInt64 = 0) {
-        self.costLimit = costLimit
-    }
-    
-    public func update(costLimit to: UInt64) {
-        ArsenalActor.assertIsolated()
-        
-        costLimit = to
-        purgeUnowned()
-        purge()
-    }
-    
-    public func set(_ value: T?, key: String) {
-        ArsenalActor.assertIsolated()
-        
-        if let img = cache[key] {
-            cost -= img.cost
-            cache[key] = nil
-        }
-        
-        if let img = value {
-            let item = MemoryItem(key: key, value: img)
-            cache[key] = item
-            cost += item.cost
-        }
-        purge()
-    }
-    
-    public func value(for key: String) -> T? {
-        ArsenalActor.assertIsolated()
-        
-        guard var item = cache[key] else { return nil }
-        
-        // update the last accessed date to ensure purges are correctly ordered
-        item.updateTimestamp()
-        return item.value
-    }
-    
-    public func contains(_ key: String) -> Bool {
-        ArsenalActor.assertIsolated()
-        
-        return cache[key] != nil
-    }
-    
-    public func purgeUnowned() {
-        ArsenalActor.assertIsolated()
-        
-        // this make all items weak
-        // by doing so, all items that aren't
-        // referenced anywhere will be nilled out
-        // then we recreate the cache with what
-        // is really owned.
-
-        print("Purge unowned")
-        print("trying to purge \(cache.count) items using \(cost) in cost")
-        
-        let weakItems = cache.values.map { $0.weakify() }
-        cache.removeAll()
-        cost = 0
-        let strongItems = weakItems.compactMap { $0.strongify() }
-        cost = strongItems.reduce(0) { $0 + $1.cost }
-        strongItems.forEach { cache[$0.key] = $0 }
-        
-        print("After purge we have \(cache.count) items using \(cost) in cost")
-    }
-    
-    public func purge() {
-        ArsenalActor.assertIsolated()
-        
-        // check our limits again in case we're
-        // good after removing non-referenced items.
-        guard costLimit > 0 && cost >= costLimit else {
-            return
-        }
-        
-        // least recently accessed first (LRU)
-        var sorted = cache.values.sorted { item1, item2 in
-            return item1.timestamp.compare(item2.timestamp) == .orderedAscending
-        }
-        
-        while !sorted.isEmpty && cost >= costLimit {
-            guard let item = sorted.first else {
-                break
-            }
-            
-            sorted.remove(at: 0)
-            cache[item.key] = nil
-            cost -= item.cost
-        }
-    }
-    
-    public func clear() {
-        ArsenalActor.assertIsolated()
-        
-        cache = [:]
-        cost = 0
-    }
-
-    private struct MemoryItem {
-        let key: String
-        let value: T
-        let cost: UInt64
-        var timestamp: Date = Date()
-        
-        init(key: String, value: T) {
-            self.key = key
-            self.value = value
-            self.cost = value.cost
-        }
-        
-        fileprivate init(key: String, value: T, cost: UInt64, timestamp: Date) {
-            self.key = key
-            self.value = value
-            self.cost = cost
-            self.timestamp = timestamp
-        }
-        
-        mutating func updateTimestamp() {
-            timestamp = Date()
-        }
-
-        func weakify() -> MemoryWeakItem {
-            MemoryWeakItem(key: key, value: value, cost: cost, timestamp: timestamp)
-        }
-    }
-    
-    private struct MemoryWeakItem {
-        let key: String
-        weak var value: T?
-        let cost: UInt64
-        var timestamp: Date = Date()
-        
-        init(key: String, value: T, cost: UInt64, timestamp: Date) {
-            self.key = key
-            self.value = value
-            self.cost = cost
-            self.timestamp = timestamp
-        }
-        
-        func strongify() -> MemoryItem? {
-            guard let val = value else {
-                return nil
-            }
-            return MemoryItem(key: key, value: val, cost: cost, timestamp: timestamp)
-        }
-    }
-    
-    private var cache: [String : MemoryItem] = [:]
-    public private(set) var cost: UInt64 = 0
-    public var costLimit: UInt64
-}
-
-@available(iOS 17.0, macOS 14.0, macCatalyst 17.0, watchOS 10.0, visionOS 1.0, tvOS 17.0, *)
-@ArsenalActor public class DiskArsenal<T: ArsenalItem> : ArsenalImp, @unchecked Sendable {
-    
-    private let urlProvider: ArsenalURLProvider
-    private let maxStaleness: TimeInterval
-    private var usedCost: UInt64 = 0
-    public var costLimit: UInt64
-    public private(set) var cost: UInt64
-    let identifier: String
-    
-    init(_ identifier: String, maxStaleness: TimeInterval = 0, costLimit: UInt64 = 0) {
-        self.identifier = identifier
-        self.urlProvider = ArsenalURLProvider(identifier, fileManager: FileManager())
-        self.maxStaleness = maxStaleness
-        self.costLimit = costLimit
-        self.cost = 0
-        Task {
-            self.cost = calculateCost()
-        }
-    }
-
-    public func update(costLimit to: UInt64) {
-        ArsenalActor.assertIsolated()
-        
-        costLimit = to
-        purgeUnowned()
-        purge()
-    }
-    
-    public func set(_ value: T?, key: String) {
-        ArsenalActor.assertIsolated()
-        
-        guard let url = urlProvider.url(for: key) else {
-            return
-        }
-        if let data = value?.toData() {
-            do {
-                try data.write(to: url)
-                let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
-                if size > 0 {
-                    cost += UInt64(size)
-                }
-                purge()
-            } catch {
-                print("DiskArsenal error: \(error)")
-            }
-        } else {
-            deleteItem(at: url)
-        }
-    }
-    
-    public func value(for key: String) -> T? {
-        ArsenalActor.assertIsolated()
-        
-        guard let url = urlProvider.url(for: key), let data = try? Data(contentsOf: url, options: .mappedIfSafe) else {
-            return nil
-        }
-        return T.from(data: data) as? T
-    }
-    
-    public func contains(for key: String) -> Bool {
-        ArsenalActor.assertIsolated()
-        
-        if let url = urlProvider.url(for: key) {
-            return urlProvider.fileManager.fileExists(atPath: url.path())
-        }
-        return false
-    }
-    
-    public func purgeUnowned() {}
-    
-    public func purge() {
-        ArsenalActor.assertIsolated()
-        
-        // TODO: Implement purge based on cost as well
-        
-        guard maxStaleness > 0 || costLimit > 0 else {
-            return
-        }
-        
-        guard let baseURL = urlProvider.cacheURL else {
-            return
-        }
-        
-        guard let urls = try? urlProvider.fileManager.contentsOfDirectory(at: baseURL, includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey], options: .skipsHiddenFiles) else {
-            return
-        }
-        
-        // sort URLs newest to oldest
-        var sortedUrls = urls.sorted { url1, url2 in
-            guard let date1 = try? url1.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate,
-                  let date2 = try? url2.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate else {
-                return false
-            }
-            return date1.compare(date2) == .orderedDescending
-        }
-        
-        // Purge based on date
-        if maxStaleness > 0 {
-            let now = Date()
-            while let url = sortedUrls.popLast() {
-                
-                guard let date = try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate else {
-                    continue
-                }
-                
-                // Item is too young, since we're sorted we can bail
-                guard now.timeIntervalSince1970 - date.timeIntervalSince1970 > maxStaleness else {
-                    break
-                }
-                
-                // We now know we need to delete the item
-                deleteItem(at: url)
-            }
-        }
-        
-        // Purge based on cost
-        if costLimit > 0 {
-            
-            while cost > costLimit, let url = sortedUrls.popLast() {
-                
-                guard let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size > 0 else {
-                    continue
-                }
-
-                // We now know we need to delete the item
-                deleteItem(at: url)
-            }
-            
-        }
-    }
-    
-    public func clear() {
-        ArsenalActor.assertIsolated()
-        
-        guard let baseURL = urlProvider.cacheURL else {
-            return
-        }
-        if let urls = try? urlProvider.fileManager.contentsOfDirectory(at: baseURL, includingPropertiesForKeys: nil) {
-            for url in urls {
-                deleteItem(at: url)
-            }
-        }
-    }
-    
-    private func deleteItem(at url: URL) {
-        ArsenalActor.assertIsolated()
-        
-        do {
-            let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
-            try urlProvider.fileManager.removeItem(at: url)
-            if size > 0 {
-                cost -= UInt64(size)
-            }
-        } catch {
-            print("DiskArsenal error: \(error)")
-        }
-    }
-    
-    private func calculateCost() -> UInt64 {
-        ArsenalActor.assertIsolated()
-        
-        guard let baseURL = urlProvider.cacheURL else {
-            return 0
-        }
-
-        guard let urls = try? urlProvider.fileManager.contentsOfDirectory(at: baseURL, includingPropertiesForKeys: [.fileSizeKey], options: .skipsHiddenFiles) else {
-            return 0
-        }
-        
-        return urls.reduce(0) { cost, url in
-            if let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size > 0 {
-                return cost + UInt64(size)
-            }
-            return cost
-        }
-    }
-}
-
-#if canImport(SwiftData)
-import SwiftData
-
-@available(iOS 17.0, macOS 14.0, macCatalyst 17.0, watchOS 10.0, visionOS 1.0, tvOS 17.0, *)
-@ArsenalActor public class SwiftDataArsenal<T: ArsenalItem> : ArsenalImp, @unchecked Sendable {
-    
-    @Model
-    fileprivate class ArsenalItemModel {
-        @Attribute(.unique) var key: String
-        @Attribute(.externalStorage) var data: Data?
-        var cost: UInt64
-        var timestamp: Date = Date()
-        
-        @Transient lazy var value: T? = T.from(data: data) as? T
-        
-        init(key: String, value: T, cost: UInt64) {
-            self.key = key
-            self.data = value.toData()
-            self.cost = cost
-            self.value = value
-        }
-    }
-    
-    private let maxStaleness: TimeInterval
-    public var costLimit: UInt64
-    let identifier: String
-    private let modelContainer: ModelContainer?
-    private let modelContext: ModelContext?
-    private let urlProvider: ArsenalURLProvider
-    
-    init(_ identifier: String, maxStaleness: TimeInterval = 0, costLimit: UInt64 = 0) {
-        self.identifier = identifier
-        self.urlProvider = ArsenalURLProvider(identifier, prefix: "sd", fileManager: FileManager())
-        self.maxStaleness = maxStaleness
-        self.costLimit = 0
-        
-        if let configURL = urlProvider.url(for: identifier)?.appendingPathExtension("sqlite") {
-            let config = ModelConfiguration(identifier, url: configURL)
-            self.modelContainer = try? ModelContainer(for: ArsenalItemModel.self, configurations: config)
-        } else {
-            self.modelContainer = try? ModelContainer(for: ArsenalItemModel.self)
-        }
-
-        if let container = self.modelContainer {
-            self.modelContext = ModelContext(container)
-        } else {
-            self.modelContext = nil
-        }
-    }
-    
-    public var cost: UInt64 {
-        0
-    }
-    
-    public func update(costLimit to: UInt64) {
-        ArsenalActor.assertIsolated()
-        // noop for now
-    }
-    
-    public func set(_ value: T?, key: String) {
-        ArsenalActor.assertIsolated()
-        
-        if let val = value {
-            let item = ArsenalItemModel(key: key, value: val, cost: val.cost)
-            modelContext?.insert(item)
-        } else {
-            
-            let fetchDescriptor = FetchDescriptor<ArsenalItemModel>(predicate: #Predicate { item in
-                item.key == key
-            })
-            do {
-                if let modelContext = modelContext, let item = try modelContext.fetch(fetchDescriptor).first {
-                    modelContext.delete(item)
-                }
-            } catch {
-                // TODO:
-            }
-        }
-        
-    }
-    
-    public func value(for key: String) -> T? {
-        ArsenalActor.assertIsolated()
-
-        let fetchDescriptor = FetchDescriptor<ArsenalItemModel>(predicate: #Predicate { item in
-            item.key == key
-        })
-        return try? modelContext?.fetch(fetchDescriptor).first?.value
-    }
-    
-    public func contains(for key: String) -> Bool {
-        ArsenalActor.assertIsolated()
-        
-        return value(for: key) != nil
-    }
-    
-    public func purgeUnowned() {}
-    
-    public func purge() {
-        ArsenalActor.assertIsolated()
-
-        // TODO: Implement purge
-    }
-    
-    public func clear() {
-        ArsenalActor.assertIsolated()
-        try? modelContext?.delete(model: ArsenalItemModel.self)
-    }
-}
-
-
-#endif
-
