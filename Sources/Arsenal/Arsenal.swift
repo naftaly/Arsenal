@@ -192,7 +192,9 @@ public protocol ArsenalItem: AnyObject, Sendable {
     ///   - identifier: A unique identifier for this cache instance.
     ///   - costLimit: The maximum cost for the memory cache. Defaults to 500 MB.
     ///   - maxStaleness: The maximum age for disk-cached items in seconds. Defaults to 1 day.
-    public convenience init(_ identifier: String, costLimit: UInt64 = UInt64(5e+8), maxStaleness: TimeInterval = 86400) {
+    public convenience init(
+        _ identifier: String, costLimit: UInt64 = UInt64(5e+8), maxStaleness: TimeInterval = 86400
+    ) {
         self.init(
             identifier,
             resources: [
@@ -335,7 +337,9 @@ public protocol ArsenalItem: AnyObject, Sendable {
         }
     }
 
-    private func forEachResource(of types: Set<ResourceType>, action: @Sendable @escaping (any ArsenalImp<T>) async -> Void) async {
+    private func forEachResource(
+        of types: Set<ResourceType>, action: @Sendable @escaping (any ArsenalImp<T>) async -> Void
+    ) async {
         for type in types {
             if let res = resources[type] {
                 await action(res)

@@ -1,5 +1,6 @@
-@testable import Arsenal
 import XCTest
+
+@testable import Arsenal
 
 @available(iOS 17.0, macOS 14.0, macCatalyst 17.0, watchOS 10.0, visionOS 1.0, *)
 class ArsenalTests: XCTestCase {
@@ -9,8 +10,12 @@ class ArsenalTests: XCTestCase {
 
     override func setUp() async throws {
         try await super.setUp()
-        await memoryCache = Arsenal("testMemory", resources: [.memory: MemoryArsenal<TestItem>(costLimit: 1024 * 500)])
-        await diskCache = Arsenal("testDisk", resources: [.disk: DiskArsenal<TestItem>("testDisk", maxStaleness: 2)])
+        await memoryCache = Arsenal(
+            "testMemory", resources: [.memory: MemoryArsenal<TestItem>(costLimit: 1024 * 500)]
+        )
+        await diskCache = Arsenal(
+            "testDisk", resources: [.disk: DiskArsenal<TestItem>("testDisk", maxStaleness: 2)]
+        )
         await combinedCache = Arsenal("testCombined", costLimit: 1024 * 100, maxStaleness: 86400)
     }
 
@@ -31,13 +36,17 @@ class ArsenalTests: XCTestCase {
         let retrievedItem = await memoryCache.value(for: key)
 
         XCTAssertNotNil(retrievedItem, "Item should be retrievable from memory cache.")
-        XCTAssertEqual(retrievedItem?.toData(), item.toData(), "Retrieved item data should match the original.")
+        XCTAssertEqual(
+            retrievedItem?.toData(), item.toData(), "Retrieved item data should match the original."
+        )
 
         await diskCache.set(item, key: key)
         let diskItem = await diskCache.value(for: key)
 
         XCTAssertNotNil(diskItem, "Item should be retrievable from disk cache.")
-        XCTAssertEqual(diskItem?.toData(), item.toData(), "Retrieved item data from disk should match the original.")
+        XCTAssertEqual(
+            diskItem?.toData(), item.toData(), "Retrieved item data from disk should match the original."
+        )
     }
 
     func testRemoveItem() async {
@@ -100,9 +109,12 @@ class ArsenalTests: XCTestCase {
 
     func testLRUOrdering() async {
         // Create a small cache that can hold 2 items (costLimit 2500, each item 1000)
-        let smallCache = await Arsenal<TestItem>("testLRU", resources: [
-            .memory: MemoryArsenal<TestItem>(costLimit: 2500),
-        ])
+        let smallCache = await Arsenal<TestItem>(
+            "testLRU",
+            resources: [
+                .memory: MemoryArsenal<TestItem>(costLimit: 2500),
+            ]
+        )
 
         // Add 2 items (each 1000 cost, total 2000 = under limit)
         let item0 = TestItem(data: Data(repeating: 0, count: 100), cost: 1000)
@@ -162,9 +174,12 @@ class ArsenalTests: XCTestCase {
 
     func testDiskCostBasedPurge() async {
         // Create disk cache with cost limit
-        let costLimitedDisk = await Arsenal<TestItem>("testDiskCost", resources: [
-            .disk: DiskArsenal<TestItem>("testDiskCost", maxStaleness: 0, costLimit: 2000),
-        ])
+        let costLimitedDisk = await Arsenal<TestItem>(
+            "testDiskCost",
+            resources: [
+                .disk: DiskArsenal<TestItem>("testDiskCost", maxStaleness: 0, costLimit: 2000),
+            ]
+        )
 
         // Add items exceeding cost limit
         for i in 0 ..< 5 {
@@ -347,10 +362,15 @@ class ArsenalTests: XCTestCase {
         }
 
         let finalCost = await diskCache.diskResourceCost
-        XCTAssertEqual(finalCost, 100, "Cost should only reflect the single item, not accumulated from overwrites.")
+        XCTAssertEqual(
+            finalCost, 100, "Cost should only reflect the single item, not accumulated from overwrites."
+        )
 
         let retrieved = await diskCache.value(for: key)
-        XCTAssertEqual(retrieved?.toData(), Data(repeating: 5, count: 100), "Retrieved item should be the last written value.")
+        XCTAssertEqual(
+            retrieved?.toData(), Data(repeating: 5, count: 100),
+            "Retrieved item should be the last written value."
+        )
     }
 
     func testEmptyCachePurge() async {

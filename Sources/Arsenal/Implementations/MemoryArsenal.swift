@@ -4,6 +4,7 @@
 //  Copyright (c) 2024 Alexander Cohen. All rights reserved.
 //
 
+import Darwin
 import Foundation
 import os
 
@@ -69,15 +70,16 @@ import os
     public func set(_ value: T?, key: String) {
         ArsenalActor.assertIsolated()
 
-        if let img = cache[key] {
-            cost -= img.cost
-            cache[key] = nil
-        }
+        // Get old cost if exists (single lookup)
+        let oldCost = cache[key]?.cost ?? 0
 
         if let img = value {
             let item = MemoryItem(key: key, value: img)
             cache[key] = item
-            cost += item.cost
+            cost = cost - oldCost + item.cost
+        } else {
+            cache[key] = nil
+            cost -= oldCost
         }
         purge()
     }
@@ -94,7 +96,6 @@ import os
 
         guard var item = cache[key] else { return nil }
 
-        // update the last accessed date to ensure purges are correctly ordered
         item.updateTimestamp()
         cache[key] = item
         return item.value
@@ -127,7 +128,9 @@ import os
         // then we recreate the cache with what
         // is really owned.
 
-        logger.debug("Purge unowned: trying to purge \(self.cache.count) items using \(self.cost) in cost")
+        logger.debug(
+            "Purge unowned: trying to purge \(self.cache.count) items using \(self.cost) in cost"
+        )
 
         let weakItems = cache.values.map { $0.weakify() }
         cache.removeAll()
@@ -152,17 +155,10 @@ import os
             return
         }
 
-        // least recently accessed first (LRU)
-        var sorted = cache.values.sorted { item1, item2 in
-            item1.timestamp.compare(item2.timestamp) == .orderedAscending
-        }
+        // Sort by timestamp descending (most recent first), so popLast() gives oldest
+        var sorted = cache.values.sorted { $0.timestamp > $1.timestamp }
 
-        while !sorted.isEmpty, cost > costLimit {
-            guard let item = sorted.first else {
-                break
-            }
-
-            sorted.remove(at: 0)
+        while cost > costLimit, let item = sorted.popLast() {
             cache[item.key] = nil
             cost -= item.cost
         }
@@ -182,15 +178,16 @@ import os
         let key: String
         let value: T
         let cost: UInt64
-        var timestamp: Date = .init()
+        var timestamp: UInt64
 
         init(key: String, value: T) {
             self.key = key
             self.value = value
             cost = value.cost
+            timestamp = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
         }
 
-        fileprivate init(key: String, value: T, cost: UInt64, timestamp: Date) {
+        init(key: String, value: T, cost: UInt64, timestamp: UInt64) {
             self.key = key
             self.value = value
             self.cost = cost
@@ -198,7 +195,7 @@ import os
         }
 
         mutating func updateTimestamp() {
-            timestamp = Date()
+            timestamp = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
         }
 
         func weakify() -> MemoryWeakItem {
@@ -210,9 +207,9 @@ import os
         let key: String
         weak var value: T?
         let cost: UInt64
-        var timestamp: Date = .init()
+        let timestamp: UInt64
 
-        init(key: String, value: T, cost: UInt64, timestamp: Date) {
+        init(key: String, value: T, cost: UInt64, timestamp: UInt64) {
             self.key = key
             self.value = value
             self.cost = cost
