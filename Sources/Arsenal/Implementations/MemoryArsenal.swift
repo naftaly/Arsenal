@@ -122,11 +122,9 @@ import os
     public func purgeUnowned() {
         ArsenalActor.assertIsolated()
 
-        // this make all items weak
-        // by doing so, all items that aren't
-        // referenced anywhere will be nilled out
-        // then we recreate the cache with what
-        // is really owned.
+        // Convert items to weak references - items not referenced
+        // elsewhere will be deallocated when we clear the cache.
+        // Then rebuild with only the surviving items.
 
         logger.debug(
             "Purge unowned: trying to purge \(self.cache.count) items using \(self.cost) in cost"
@@ -134,10 +132,16 @@ import os
 
         let weakItems = cache.values.map { $0.weakify() }
         cache.removeAll()
-        cost = 0
-        let strongItems = weakItems.compactMap { $0.strongify() }
-        cost = strongItems.reduce(0) { $0 + $1.cost }
-        strongItems.forEach { cache[$0.key] = $0 }
+
+        // Single pass: filter valid items, rebuild cache, and sum cost
+        var newCost: UInt64 = 0
+        for weakItem in weakItems {
+            if let strongItem = weakItem.strongify() {
+                cache[strongItem.key] = strongItem
+                newCost += strongItem.cost
+            }
+        }
+        cost = newCost
 
         logger.debug("After purge we have \(self.cache.count) items using \(self.cost) in cost")
     }

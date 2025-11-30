@@ -383,6 +383,36 @@ class ArsenalTests: XCTestCase {
         XCTAssertEqual(memoryCost, 0, "Empty cache should have zero cost.")
         XCTAssertEqual(diskCost, 0, "Empty disk cache should have zero cost.")
     }
+
+    func testPurgeUnownedReleasesUnreferencedItems() async {
+        // Keep a strong reference to this item
+        let retainedItem = TestItem(data: Data(repeating: 1, count: 100), cost: 1000)
+        await memoryCache.set(retainedItem, key: "retained")
+
+        // Add item without keeping a reference (only cache holds it)
+        await memoryCache.set(
+            TestItem(data: Data(repeating: 2, count: 100), cost: 1000),
+            key: "unretained"
+        )
+
+        let costBefore = await memoryCache.memoryResourceCost
+        XCTAssertEqual(costBefore, 2000, "Should have 2 items before purge.")
+
+        // Purge items not referenced outside the cache
+        await memoryCache.purgeUnowned([.memory])
+
+        let costAfter = await memoryCache.memoryResourceCost
+        XCTAssertEqual(costAfter, 1000, "Should have 1 item after purging unowned.")
+
+        // Retained item should still exist
+        let retrieved = await memoryCache.value(for: "retained")
+        XCTAssertNotNil(retrieved, "Retained item should survive purgeUnowned.")
+        XCTAssertEqual(retrieved?.toData(), retainedItem.toData(), "Retained item data should match.")
+
+        // Unretained item should be gone
+        let unretained = await memoryCache.value(for: "unretained")
+        XCTAssertNil(unretained, "Unretained item should be purged.")
+    }
 }
 
 // MARK: - Test Item
