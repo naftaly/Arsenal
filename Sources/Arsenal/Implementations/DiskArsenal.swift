@@ -147,7 +147,9 @@ import os
     public func value(for key: String) -> T? {
         ArsenalActor.assertIsolated()
 
-        guard let url = urlProvider.url(for: key), let data = try? Data(contentsOf: url, options: .mappedIfSafe) else {
+        guard let url = urlProvider.url(for: key),
+              let data = try? Data(contentsOf: url, options: .mappedIfSafe)
+        else {
             return nil
         }
         return T.from(data: data) as? T
@@ -189,14 +191,22 @@ import os
             return
         }
 
-        guard let urls = try? urlProvider.fileManager.contentsOfDirectory(at: baseURL, includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey], options: .skipsHiddenFiles) else {
+        guard
+            let urls = try? urlProvider.fileManager.contentsOfDirectory(
+                at: baseURL, includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey],
+                options: .skipsHiddenFiles
+            )
+        else {
             return
         }
 
         // sort URLs newest to oldest
         var sortedUrls = urls.sorted { url1, url2 in
-            guard let date1 = try? url1.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate,
-                  let date2 = try? url2.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+            guard
+                let date1 = try? url1.resourceValues(forKeys: [.contentModificationDateKey])
+                .contentModificationDate,
+                let date2 = try? url2.resourceValues(forKeys: [.contentModificationDateKey])
+                .contentModificationDate
             else {
                 return false
             }
@@ -208,7 +218,10 @@ import os
             let now = Date()
             var itemsWithoutDates: [URL] = []
             while let url = sortedUrls.popLast() {
-                guard let date = try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate else {
+                guard
+                    let date = try? url.resourceValues(forKeys: [.contentModificationDateKey])
+                    .contentModificationDate
+                else {
                     // Keep items without valid dates for cost-based purge
                     itemsWithoutDates.append(url)
                     continue
@@ -249,7 +262,9 @@ import os
         guard let baseURL = urlProvider.cacheURL else {
             return
         }
-        if let urls = try? urlProvider.fileManager.contentsOfDirectory(at: baseURL, includingPropertiesForKeys: nil) {
+        if let urls = try? urlProvider.fileManager.contentsOfDirectory(
+            at: baseURL, includingPropertiesForKeys: nil
+        ) {
             for url in urls {
                 deleteItem(at: url)
             }
@@ -280,7 +295,11 @@ import os
             return 0
         }
 
-        guard let urls = try? urlProvider.fileManager.contentsOfDirectory(at: baseURL, includingPropertiesForKeys: [.fileSizeKey], options: .skipsHiddenFiles) else {
+        guard
+            let urls = try? urlProvider.fileManager.contentsOfDirectory(
+                at: baseURL, includingPropertiesForKeys: [.fileSizeKey], options: .skipsHiddenFiles
+            )
+        else {
             return 0
         }
 
@@ -329,15 +348,21 @@ class ArsenalURLProvider {
     /// Creates the directory if it doesn't exist. Returns `nil` if the
     /// Caches directory cannot be accessed.
     var cacheURL: URL? {
-        if let baseURL = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first?.appending(component: sanitizedIdentifier) {
+        if let baseURL = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first?.appending(
+            component: sanitizedIdentifier
+        ) {
             try? fileManager.createDirectory(at: baseURL, withIntermediateDirectories: true)
             return baseURL
         }
         return nil
     }
 
-    private lazy var sanitizedIdentifier: String = sanitize(prefix.isEmpty ? identifier : prefix + "." + identifier)
-    private lazy var allowedCharacterSet: CharacterSet = .alphanumerics.union(CharacterSet(charactersIn: "._-"))
+    private lazy var sanitizedIdentifier: String = sanitize(
+        prefix.isEmpty ? identifier : prefix + "." + identifier
+    )
+    private lazy var allowedCharacterSet: CharacterSet = .alphanumerics.union(
+        CharacterSet(charactersIn: "._-")
+    )
 
     /// Sanitizes a string to be a valid file name.
     ///

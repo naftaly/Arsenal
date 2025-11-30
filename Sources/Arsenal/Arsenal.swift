@@ -192,7 +192,9 @@ public protocol ArsenalItem: AnyObject, Sendable {
     ///   - identifier: A unique identifier for this cache instance.
     ///   - costLimit: The maximum cost for the memory cache. Defaults to 500 MB.
     ///   - maxStaleness: The maximum age for disk-cached items in seconds. Defaults to 1 day.
-    public convenience init(_ identifier: String, costLimit: UInt64 = UInt64(5e+8), maxStaleness: TimeInterval = 86400) {
+    public convenience init(
+        _ identifier: String, costLimit: UInt64 = UInt64(5e+8), maxStaleness: TimeInterval = 86400
+    ) {
         self.init(
             identifier,
             resources: [
@@ -310,7 +312,7 @@ public protocol ArsenalItem: AnyObject, Sendable {
     ///
     /// - Parameter types: The resource types to include. Defaults to both memory and disk.
     /// - Returns: The sum of costs across all specified resources.
-    public func cost(_ types: Set<ResourceType> = [.memory, .disk]) async -> UInt64 {
+    public func cost(_ types: Set<ResourceType> = [.memory, .disk]) -> UInt64 {
         types.reduce(into: 0) {
             $0 += resources[$1]?.cost ?? 0
         }
@@ -320,7 +322,7 @@ public protocol ArsenalItem: AnyObject, Sendable {
     ///
     /// - Parameter types: The resource types to include. Defaults to both memory and disk.
     /// - Returns: The sum of cost limits across all specified resources.
-    public func costLimit(_ types: Set<ResourceType> = [.memory, .disk]) async -> UInt64 {
+    public func costLimit(_ types: Set<ResourceType> = [.memory, .disk]) -> UInt64 {
         types.reduce(into: 0) {
             $0 += resources[$1]?.costLimit ?? 0
         }
@@ -335,11 +337,22 @@ public protocol ArsenalItem: AnyObject, Sendable {
         }
     }
 
-    private func forEachResource(of types: Set<ResourceType>, action: @Sendable @escaping (any ArsenalImp<T>) async -> Void) async {
-        for type in types {
-            if let res = resources[type] {
-                await action(res)
-            }
+    // Note: Using explicit async let instead of TaskGroup because Swift 6's
+    // region-based isolation checker doesn't support TaskGroup in this actor context.
+    private func forEachResource(
+        of types: Set<ResourceType>, action: @Sendable @escaping (any ArsenalImp<T>) async -> Void
+    ) async {
+        let memRes = types.contains(.memory) ? memoryResource : nil
+        let diskRes = types.contains(.disk) ? diskResource : nil
+
+        if let memRes, let diskRes {
+            async let memTask: Void = action(memRes)
+            async let diskTask: Void = action(diskRes)
+            _ = await (memTask, diskTask)
+        } else if let memRes {
+            await action(memRes)
+        } else if let diskRes {
+            await action(diskRes)
         }
     }
 

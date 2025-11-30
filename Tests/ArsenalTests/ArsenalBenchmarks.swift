@@ -1,5 +1,6 @@
-@testable import Arsenal
 import XCTest
+
+@testable import Arsenal
 
 /// Performance benchmarks for Arsenal caching operations.
 ///
@@ -9,9 +10,12 @@ class ArsenalBenchmarks: XCTestCase {
     // MARK: - Memory Cache Benchmarks
 
     func testBenchmarkMemorySet() async throws {
-        let cache = await Arsenal<BenchmarkItem>("benchMemorySet", resources: [
-            .memory: MemoryArsenal<BenchmarkItem>(costLimit: 0), // No limit for benchmark
-        ])
+        let cache = await Arsenal<BenchmarkItem>(
+            "benchMemorySet",
+            resources: [
+                .memory: MemoryArsenal<BenchmarkItem>(costLimit: 0), // No limit for benchmark
+            ]
+        )
 
         let items = (0 ..< 1000).map { i in
             BenchmarkItem(data: Data(repeating: UInt8(i % 256), count: 1024), cost: 1024)
@@ -32,9 +36,12 @@ class ArsenalBenchmarks: XCTestCase {
     }
 
     func testBenchmarkMemoryGet() async throws {
-        let cache = await Arsenal<BenchmarkItem>("benchMemoryGet", resources: [
-            .memory: MemoryArsenal<BenchmarkItem>(costLimit: 0),
-        ])
+        let cache = await Arsenal<BenchmarkItem>(
+            "benchMemoryGet",
+            resources: [
+                .memory: MemoryArsenal<BenchmarkItem>(costLimit: 0),
+            ]
+        )
 
         // Pre-populate cache
         for i in 0 ..< 1000 {
@@ -58,9 +65,12 @@ class ArsenalBenchmarks: XCTestCase {
 
     func testBenchmarkMemorySetWithPurge() async throws {
         // Cache with limit that will trigger purges
-        let cache = await Arsenal<BenchmarkItem>("benchMemoryPurge", resources: [
-            .memory: MemoryArsenal<BenchmarkItem>(costLimit: 100 * 1024), // 100 KB limit
-        ])
+        let cache = await Arsenal<BenchmarkItem>(
+            "benchMemoryPurge",
+            resources: [
+                .memory: MemoryArsenal<BenchmarkItem>(costLimit: 100 * 1024), // 100 KB limit
+            ]
+        )
 
         let items = (0 ..< 500).map { i in
             BenchmarkItem(data: Data(repeating: UInt8(i % 256), count: 1024), cost: 1024)
@@ -83,9 +93,12 @@ class ArsenalBenchmarks: XCTestCase {
     // MARK: - Disk Cache Benchmarks
 
     func testBenchmarkDiskSet() async throws {
-        let cache = await Arsenal<BenchmarkItem>("benchDiskSet", resources: [
-            .disk: DiskArsenal<BenchmarkItem>("benchDiskSet", maxStaleness: 0, costLimit: 0),
-        ])
+        let cache = await Arsenal<BenchmarkItem>(
+            "benchDiskSet",
+            resources: [
+                .disk: DiskArsenal<BenchmarkItem>("benchDiskSet", maxStaleness: 0, costLimit: 0),
+            ]
+        )
 
         // Clear any existing data
         await cache.clear([.disk])
@@ -109,9 +122,12 @@ class ArsenalBenchmarks: XCTestCase {
     }
 
     func testBenchmarkDiskGet() async throws {
-        let cache = await Arsenal<BenchmarkItem>("benchDiskGet", resources: [
-            .disk: DiskArsenal<BenchmarkItem>("benchDiskGet", maxStaleness: 0, costLimit: 0),
-        ])
+        let cache = await Arsenal<BenchmarkItem>(
+            "benchDiskGet",
+            resources: [
+                .disk: DiskArsenal<BenchmarkItem>("benchDiskGet", maxStaleness: 0, costLimit: 0),
+            ]
+        )
 
         // Pre-populate cache
         for i in 0 ..< 100 {
@@ -193,13 +209,18 @@ class ArsenalBenchmarks: XCTestCase {
     // MARK: - Large Item Benchmarks
 
     func testBenchmarkLargeItemMemory() async throws {
-        let cache = await Arsenal<BenchmarkItem>("benchLargeMemory", resources: [
-            .memory: MemoryArsenal<BenchmarkItem>(costLimit: 0),
-        ])
+        let cache = await Arsenal<BenchmarkItem>(
+            "benchLargeMemory",
+            resources: [
+                .memory: MemoryArsenal<BenchmarkItem>(costLimit: 0),
+            ]
+        )
 
         // 1 MB items
         let items = (0 ..< 50).map { i in
-            BenchmarkItem(data: Data(repeating: UInt8(i % 256), count: 1024 * 1024), cost: UInt64(1024 * 1024))
+            BenchmarkItem(
+                data: Data(repeating: UInt8(i % 256), count: 1024 * 1024), cost: UInt64(1024 * 1024)
+            )
         }
 
         measure {
@@ -217,15 +238,20 @@ class ArsenalBenchmarks: XCTestCase {
     }
 
     func testBenchmarkLargeItemDisk() async throws {
-        let cache = await Arsenal<BenchmarkItem>("benchLargeDisk", resources: [
-            .disk: DiskArsenal<BenchmarkItem>("benchLargeDisk", maxStaleness: 0, costLimit: 0),
-        ])
+        let cache = await Arsenal<BenchmarkItem>(
+            "benchLargeDisk",
+            resources: [
+                .disk: DiskArsenal<BenchmarkItem>("benchLargeDisk", maxStaleness: 0, costLimit: 0),
+            ]
+        )
 
         await cache.clear([.disk])
 
         // 1 MB items
         let items = (0 ..< 20).map { i in
-            BenchmarkItem(data: Data(repeating: UInt8(i % 256), count: 1024 * 1024), cost: UInt64(1024 * 1024))
+            BenchmarkItem(
+                data: Data(repeating: UInt8(i % 256), count: 1024 * 1024), cost: UInt64(1024 * 1024)
+            )
         }
 
         measure {
@@ -245,9 +271,12 @@ class ArsenalBenchmarks: XCTestCase {
     // MARK: - Throughput Benchmarks
 
     func testBenchmarkMemoryThroughput() async throws {
-        let cache = await Arsenal<BenchmarkItem>("benchThroughput", resources: [
-            .memory: MemoryArsenal<BenchmarkItem>(costLimit: 0),
-        ])
+        let cache = await Arsenal<BenchmarkItem>(
+            "benchThroughput",
+            resources: [
+                .memory: MemoryArsenal<BenchmarkItem>(costLimit: 0),
+            ]
+        )
 
         let item = BenchmarkItem(data: Data(repeating: 0, count: 512), cost: 512)
 
@@ -273,9 +302,12 @@ class ArsenalBenchmarks: XCTestCase {
     // MARK: - Clear Benchmarks
 
     func testBenchmarkClearMemory() async throws {
-        let cache = await Arsenal<BenchmarkItem>("benchClearMemory", resources: [
-            .memory: MemoryArsenal<BenchmarkItem>(costLimit: 0),
-        ])
+        let cache = await Arsenal<BenchmarkItem>(
+            "benchClearMemory",
+            resources: [
+                .memory: MemoryArsenal<BenchmarkItem>(costLimit: 0),
+            ]
+        )
 
         measure {
             let expectation = self.expectation(description: "Clear memory")
@@ -294,9 +326,12 @@ class ArsenalBenchmarks: XCTestCase {
     }
 
     func testBenchmarkClearDisk() async throws {
-        let cache = await Arsenal<BenchmarkItem>("benchClearDisk", resources: [
-            .disk: DiskArsenal<BenchmarkItem>("benchClearDisk", maxStaleness: 0, costLimit: 0),
-        ])
+        let cache = await Arsenal<BenchmarkItem>(
+            "benchClearDisk",
+            resources: [
+                .disk: DiskArsenal<BenchmarkItem>("benchClearDisk", maxStaleness: 0, costLimit: 0),
+            ]
+        )
 
         measure {
             let expectation = self.expectation(description: "Clear disk")

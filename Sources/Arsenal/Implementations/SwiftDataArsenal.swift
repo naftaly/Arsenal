@@ -135,9 +135,11 @@ import Foundation
                 let item = ArsenalItemModel(key: key, value: val, cost: val.cost)
                 modelContext?.insert(item)
             } else {
-                let fetchDescriptor = FetchDescriptor<ArsenalItemModel>(predicate: #Predicate { item in
-                    item.key == key
-                })
+                let fetchDescriptor = FetchDescriptor<ArsenalItemModel>(
+                    predicate: #Predicate { item in
+                        item.key == key
+                    }
+                )
                 do {
                     if let modelContext, let item = try modelContext.fetch(fetchDescriptor).first {
                         modelContext.delete(item)
@@ -155,9 +157,11 @@ import Foundation
         public func value(for key: String) -> T? {
             ArsenalActor.assertIsolated()
 
-            let fetchDescriptor = FetchDescriptor<ArsenalItemModel>(predicate: #Predicate { item in
-                item.key == key
-            })
+            let fetchDescriptor = FetchDescriptor<ArsenalItemModel>(
+                predicate: #Predicate { item in
+                    item.key == key
+                }
+            )
             return try? modelContext?.fetch(fetchDescriptor).first?.value
         }
 
