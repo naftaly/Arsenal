@@ -9,7 +9,8 @@ let package = Package(
         // Products define the executables and libraries a package produces, making them visible to other packages.
         .library(
             name: "Arsenal",
-            targets: ["Arsenal"]),
+            targets: ["Arsenal"]
+        ),
     ],
     targets: [
         // Targets are the basic building blocks of a package, defining a module or a test suite.
@@ -18,7 +19,7 @@ let package = Package(
             name: "Arsenal",
             swiftSettings: [
                 // Enable this if you want to play around with the SwiftData Storage
-                //.define("SWIFT_DATA_ARSENAL")
+                // .define("SWIFT_DATA_ARSENAL")
             ]
         ),
         .testTarget(

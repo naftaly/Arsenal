@@ -127,7 +127,7 @@ import os
         // then we recreate the cache with what
         // is really owned.
 
-        logger.debug("Purge unowned: trying to purge \(self.cache.count) items using \(self.cost) in cost")
+        logger.debug("Purge unowned: trying to purge \(cache.count) items using \(cost) in cost")
 
         let weakItems = cache.values.map { $0.weakify() }
         cache.removeAll()
@@ -136,7 +136,7 @@ import os
         cost = strongItems.reduce(0) { $0 + $1.cost }
         strongItems.forEach { cache[$0.key] = $0 }
 
-        logger.debug("After purge we have \(self.cache.count) items using \(self.cost) in cost")
+        logger.debug("After purge we have \(cache.count) items using \(cost) in cost")
     }
 
     /// Purges items using LRU eviction until the cache is within its cost limit.
@@ -148,7 +148,7 @@ import os
 
         // check our limits again in case we're
         // good after removing non-referenced items.
-        guard costLimit > 0 && cost >= costLimit else {
+        guard costLimit > 0, cost >= costLimit else {
             return
         }
 
@@ -157,7 +157,7 @@ import os
             item1.timestamp.compare(item2.timestamp) == .orderedAscending
         }
 
-        while !sorted.isEmpty && cost >= costLimit {
+        while !sorted.isEmpty, cost >= costLimit {
             guard let item = sorted.first else {
                 break
             }

@@ -344,11 +344,11 @@ public protocol ArsenalItem: AnyObject, Sendable {
     }
 
     private var memoryResource: (any ArsenalImp<T>)? {
-        return resources[.memory]
+        resources[.memory]
     }
 
     private var diskResource: (any ArsenalImp<T>)? {
-        return resources[.disk]
+        resources[.disk]
     }
 
     private var resources: [ResourceType: any ArsenalImp<T>]

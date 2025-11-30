@@ -6,7 +6,6 @@ import XCTest
 /// Run with: `swift test --filter Benchmark`
 @available(iOS 17.0, macOS 14.0, macCatalyst 17.0, watchOS 10.0, visionOS 1.0, *)
 class ArsenalBenchmarks: XCTestCase {
-
     // MARK: - Memory Cache Benchmarks
 
     func testBenchmarkMemorySet() async throws {
@@ -330,11 +329,11 @@ extension ArsenalBenchmarks {
         }
 
         func toData() -> Data? {
-            return data
+            data
         }
 
         static func from(data: Data?) -> ArsenalItem? {
-            guard let data = data else { return nil }
+            guard let data else { return nil }
             return BenchmarkItem(data: data, cost: UInt64(data.count))
         }
     }

@@ -323,11 +323,11 @@ extension ArsenalTests {
         }
 
         func toData() -> Data? {
-            return data
+            data
         }
 
         static func from(data: Data?) -> ArsenalItem? {
-            guard let data = data else { return nil }
+            guard let data else { return nil }
             return TestItem(data: data, cost: UInt64(data.count))
         }
     }

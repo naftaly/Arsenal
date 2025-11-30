@@ -71,7 +71,7 @@ import Foundation
         ///
         /// - Returns: JPEG data representation of the image, or `nil` if encoding fails.
         public func toData() -> Data? {
-            return jpegData(compressionQuality: 1)
+            jpegData(compressionQuality: 1)
         }
 
         /// Creates a `UIImage` from serialized data.
@@ -90,7 +90,7 @@ import Foundation
         /// Calculated as `width * height` in points. This provides a consistent
         /// relative measure for comparing image sizes, regardless of scale factor.
         public var cost: UInt64 {
-            return UInt64(size.width * size.height)
+            UInt64(size.width * size.height)
         }
     }
 

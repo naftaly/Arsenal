@@ -139,7 +139,7 @@ import Foundation
                     item.key == key
                 })
                 do {
-                    if let modelContext = modelContext, let item = try modelContext.fetch(fetchDescriptor).first {
+                    if let modelContext, let item = try modelContext.fetch(fetchDescriptor).first {
                         modelContext.delete(item)
                     }
                 } catch {

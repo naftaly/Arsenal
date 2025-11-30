@@ -319,14 +319,14 @@ class ArsenalURLProvider {
     }
 
     private lazy var sanitizedIdentifier: String = sanitize(prefix.isEmpty ? identifier : prefix + "." + identifier)
-    private lazy var allowedCharacterSet: CharacterSet = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "._-"))
+    private lazy var allowedCharacterSet: CharacterSet = .alphanumerics.union(CharacterSet(charactersIn: "._-"))
 
     /// Sanitizes a string to be a valid file name.
     ///
     /// - Parameter key: The string to sanitize.
     /// - Returns: A filesystem-safe version of the string.
     func sanitize(_ key: String) -> String {
-        return key.addingPercentEncoding(withAllowedCharacters: allowedCharacterSet) ?? key
+        key.addingPercentEncoding(withAllowedCharacters: allowedCharacterSet) ?? key
     }
 
     /// Returns the file URL for a cache key.
@@ -334,6 +334,6 @@ class ArsenalURLProvider {
     /// - Parameter key: The cache key.
     /// - Returns: The URL where the item should be stored, or `nil` if unavailable.
     func url(for key: String) -> URL? {
-        return cacheURL?.appending(component: sanitize(key))
+        cacheURL?.appending(component: sanitize(key))
     }
 }
