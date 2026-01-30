@@ -44,7 +44,7 @@ import os
 /// }
 /// ```
 @available(iOS 17.0, macOS 14.0, macCatalyst 17.0, watchOS 10.0, visionOS 1.0, tvOS 17.0, *)
-@ArsenalActor public class DiskArsenal<T: ArsenalItem>: ArsenalImp {
+@ArsenalActor @Observable public class DiskArsenal<T: ArsenalItem>: ArsenalImp {
     private let logger = Logger(subsystem: "com.bedroomcode.arsenal", category: "DiskArsenal")
     private let urlProvider: ArsenalURLProvider
     private let maxStaleness: TimeInterval

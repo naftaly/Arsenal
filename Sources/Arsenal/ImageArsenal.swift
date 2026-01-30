@@ -85,12 +85,14 @@ import Foundation
             return UIImage(data: data)
         }
 
-        /// The relative cost of storing this image.
+        /// The estimated memory cost of storing this image in bytes.
         ///
-        /// Calculated as `width * height` in points. This provides a consistent
-        /// relative measure for comparing image sizes, regardless of scale factor.
+        /// Calculated as `width * height * scale^2 * 4` to account for
+        /// actual pixel dimensions and 4 bytes per pixel (RGBA).
         public var cost: UInt64 {
-            UInt64(size.width * size.height)
+            let pixelWidth = size.width * scale
+            let pixelHeight = size.height * scale
+            return UInt64(pixelWidth * pixelHeight) * 4
         }
     }
 
